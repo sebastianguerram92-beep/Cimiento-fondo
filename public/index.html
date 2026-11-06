@@ -97,6 +97,13 @@ td.r,th.r{text-align:right}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:12px 18px;border-radius:12px;font-weight:600;z-index:20;max-width:calc(100% - 32px)}
 html,body{background:var(--bg)}
 a.btn{text-decoration:none}
+.miembros-admin{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,320px),1fr));gap:12px}
+.m-admin{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.m-admin .roles{display:flex;flex-wrap:wrap;gap:6px}
+.m-admin .rol{display:inline-flex;align-items:center;gap:6px;font-size:13px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;background:var(--soft)}
+.m-admin .rol input{width:16px;height:16px;margin:0}
+.m-admin .email{display:flex;gap:6px}
+.m-admin .email input{flex:1;min-width:0;min-height:40px;border:1px solid var(--line);border-radius:10px;padding:0 10px;background:var(--surface)}
 .dlg{border:1px solid var(--line);border-radius:14px;padding:14px;max-width:min(92vw,720px);background:var(--surface);color:var(--fg)}
 .dlg::backdrop{background:rgb(0 0 0 / .5)}
 .dlg img{display:block;max-width:100%;max-height:75vh;margin-top:10px;border-radius:8px}
@@ -585,6 +592,8 @@ function vistaGestion(){
   const obls = obligacionesOrden();
   const sig = (()=>{ const l=obls[obls.length-1]; return l ? sigMes(l.periodo) : h.slice(0,7); })();
   const admin = puede("admin"), gestor = puede("gestor");
+  const prox6 = obls.filter(o=>o.vence >= h).slice(0,6);
+  const obMes = (prox6[0]||{}).periodo || sig;
   return `<div class="stack"><h1>Gestión</h1>
   <div class="grid2">
     <section class="card"><div class="row"><h2>Pagos por validar</h2><span class="pill ${pend.length?"warn":"ok"}">${pend.length}</span></div>
@@ -597,13 +606,16 @@ function vistaGestion(){
     </section>
   </div>
   ${gestor?`<div class="grid2">
-    <section class="card"><h2>Publicar aporte del mes</h2>
+    <section class="card"><h2>Calendario de cuotas</h2>
+      <span class="small muted">Aquí se define cuánto paga cada integrante por cada mes. Ya está cargado hasta ${prox6.length?mesNombre(obls[obls.length-1].periodo):"—"}. Úsalo para cambiar la cuota (por ejemplo, cuando en diciembre definan la de 2027) o para agregar meses nuevos. El pago de cada mes se hace del ${c.diaInicio} al ${c.diaFin} del mes siguiente.</span>
       <form id="f-obl"><div class="fields">
-        <div class="field"><label for="ob-periodo">Mes</label><input id="ob-periodo" type="month" value="${sig}" required></div>
-        <div class="field"><label for="ob-monto">Monto por persona</label><input id="ob-monto" inputmode="numeric" value="${obls.length?Math.round(obls[obls.length-1].monto):""}" required></div>
-        <div class="field"><label for="ob-vence">Último día de pago</label><input id="ob-vence" type="date" value="${sigMes(sig)}-${String(c.diaFin).padStart(2,"0")}" required></div>
-      </div><button class="btn primary">Publicar</button></form>
-      <div class="list small">${obls.slice().reverse().slice(0,6).map(o=>`<div><span>${mesNombre(o.periodo)} · se paga ${ventana(o)}</span><span class="num">${COP(o.monto)} <button class="btn small ghost" data-act="del-obl" data-id="${o.id}" aria-label="Quitar ${mesNombre(o.periodo)}">Quitar</button></span></div>`).join("")}</div>
+        <div class="field"><label for="ob-periodo">Mes del aporte</label><input id="ob-periodo" type="month" value="${obMes}" required></div>
+        <div class="field"><label for="ob-monto">Cuota por persona</label><input id="ob-monto" inputmode="numeric" value="${S.obligaciones[obMes]?Math.round(S.obligaciones[obMes].monto):(obls.length?Math.round(obls[obls.length-1].monto):"")}" required></div>
+      </div>
+      <label class="check"><input id="ob-adelante" type="checkbox"> Aplicar esta cuota también a todos los meses siguientes ya cargados</label>
+      <button class="btn primary">Guardar cuota</button></form>
+      <div class="small muted">Próximos meses</div>
+      <div class="list small">${prox6.map(o=>`<div><span><strong>${mesNombre(o.periodo)}</strong><br><span class="muted">Se paga ${ventana(o)}</span></span><span class="num" style="text-align:right">${COP(o.monto)}<br><button class="btn small ghost" data-act="del-obl" data-id="${o.id}" aria-label="Quitar ${mesNombre(o.periodo)}" style="min-height:0;padding:2px 6px">Quitar</button></span></div>`).join("")}</div>
     </section>
     <section class="card"><h2>Saldo y tasa de usura</h2>
       <form id="f-saldo"><div class="fields">
@@ -635,9 +647,11 @@ function vistaGestion(){
       <button class="btn primary">Guardar reglas</button></form>
     </section>
     <section class="card" style="grid-column:1/-1"><h2>Integrantes y roles</h2>
-      <div class="tablebox"><table><thead><tr><th>Integrante</th>${Object.keys(ROL_NOMBRE).map(r=>`<th>${ROL_NOMBRE[r].split(" ")[0]}</th>`).join("")}<th>Correo</th><th></th></tr></thead><tbody>
-      ${ms.map(([id,m])=>`<tr><td>${esc(m.nombre)}<br><span class="small muted">${m.tienePass?"Con contraseña":"Sin contraseña aún"}</span></td>${Object.keys(ROL_NOMBRE).map(r=>`<td><input type="checkbox" aria-label="${ROL_NOMBRE[r]} para ${esc(m.nombre)}" data-act="rol" data-id="${id}" data-rol="${r}" ${(m.roles||[]).includes(r)?"checked":""} ${id===yo&&r==="admin"?"disabled":""} style="width:20px;height:20px"></td>`).join("")}<td style="min-width:220px"><span style="display:flex;gap:6px"><input id="em-${id}" type="email" value="${esc(m.email||"")}" placeholder="correo@ejemplo.com" aria-label="Correo de ${esc(m.nombre)}" style="min-width:0"><button class="btn small" data-act="email" data-id="${id}">Guardar</button></span></td><td>${m.tienePass?`<button class="btn small ghost" data-act="reset" data-id="${id}">Reiniciar clave</button>`:""}</td></tr>`).join("")}
-      </tbody></table></div>
+      <div class="miembros-admin">${ms.map(([id,m])=>`<div class="m-admin">
+        <div class="row"><span><strong>${esc(m.nombre)}</strong><br><span class="small muted">${m.tienePass?"Con contraseña":"Sin contraseña aún"}</span></span>${m.tienePass?`<button class="btn small ghost" data-act="reset" data-id="${id}">Reiniciar clave</button>`:""}</div>
+        <div class="roles">${Object.keys(ROL_NOMBRE).map(r=>`<label class="rol"><input type="checkbox" data-act="rol" data-id="${id}" data-rol="${r}" ${(m.roles||[]).includes(r)?"checked":""} ${id===yo&&r==="admin"?"disabled":""}> ${ROL_NOMBRE[r]}</label>`).join("")}</div>
+        <div class="email"><input id="em-${id}" type="email" value="${esc(m.email||"")}" placeholder="correo@ejemplo.com" aria-label="Correo de ${esc(m.nombre)}"><button class="btn small" data-act="email" data-id="${id}">Guardar</button></div>
+      </div>`).join("")}</div>
       <form id="f-correos"><div class="field"><label for="cr-lista">Pegar correos de varios integrantes a la vez</label><textarea id="cr-lista" rows="4" placeholder="Pega la lista tal cual: una línea por persona, con su nombre y su correo"></textarea><span class="small muted">Busca en cada línea un nombre de integrante y un correo, y los guarda juntos.</span></div>
       <button class="btn">Guardar correos</button></form>
       <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Comprobantes en Drive: ${Object.values(S.pagos).filter(p=>p.comprobante&&p.enDrive).length} de ${Object.values(S.pagos).filter(p=>p.comprobante).length} enviados.</span><button class="btn small" data-act="drive-sync">Enviar pendientes a Drive</button></div>
@@ -691,7 +705,11 @@ function bind(){
       toast(d.aviso==="enviado" ? "Pago enviado. Le llegó un correo a quien valida." : "Pago enviado para validación");
     } catch(e){ toast("No se pudo enviar: "+e.message); }
     await cargar(); });
-  on("f-obl", async()=>{ const p=val("ob-periodo"), monto=numVal("ob-monto"); if(!p||!(monto>0)) return; await put("obligaciones", p, {periodo:p, monto, vence:val("ob-vence")}); toast("Aporte de "+mesNombre(p)+" publicado"); });
+  on("f-obl", async()=>{ const p=val("ob-periodo"), monto=numVal("ob-monto"); if(!p||!(monto>0)){ toast("Escribe el mes y la cuota"); return; }
+    const meses = [p, ...(document.getElementById("ob-adelante").checked ? Object.keys(S.obligaciones).filter(k=>k>p) : [])];
+    try { for (const k of meses){ const prev=S.obligaciones[k]||{}; const {nota, ...resto}=prev; await api("doc/obligaciones/"+k,{method:"PUT", body:{...resto, periodo:k, monto, vence: prev.vence || (sigMes(k)+"-"+String(cfg().diaFin).padStart(2,"0"))}}); } toast(meses.length>1?`Cuota guardada en ${meses.length} meses`:"Cuota de "+mesNombre(p)+" guardada"); } catch(e){ toast("No se pudo guardar: "+e.message); }
+    await cargar(); });
+  { const pm=document.getElementById("ob-periodo"); if(pm) pm.addEventListener("change", ()=>{ const o=S.obligaciones[pm.value]; if(o) document.getElementById("ob-monto").value=Math.round(o.monto); }); }
   on("f-saldo", async()=>{
     const pos = String(val("sd-pos")||"").split("\n").map(l=>l.split(";").map(x=>x.trim())).filter(p=>p[0]).map(([nombre,titular,tipo,pct])=>({nombre, titular:titular||"", tipo:/altern/i.test(tipo||"")?"alternativa":"renta fija", pct:Number(String(pct||"").replace(",","."))||0}));
     const total = pos.reduce((t,x)=>t+x.pct,0);

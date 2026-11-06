@@ -135,7 +135,7 @@ const mesNombre = (p: string) => { const [y, m] = p.split("-").map(Number); retu
 
 // Correo a quienes validan pagos (gestor o administrador con email registrado).
 async function avisarPago(miembros: Data, id: string, pago: Doc, comprobante: { bytes: Uint8Array; tipo: string } | null) {
-  const user = env("GMAIL_USER"), pass = env("GMAIL_APP_PASSWORD");
+  const user = env("GMAIL_USER"), pass = env("GMAIL_APP_PASSWORD").replace(/\s+/g, "");
   if (!user || !pass) return false;
   const destinos = Object.values(miembros).filter((m) => m.email && ((m.roles || []).includes("validador") || (m.roles || []).includes("gestor"))).map((m) => m.email);
   if (!destinos.length) return false;

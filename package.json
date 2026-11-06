@@ -1,0 +1,10 @@
+{
+  "name": "cimiento-fondo",
+  "private": true,
+  "type": "module",
+  "description": "Cimiento: plataforma del fondo de inversión (aportes, mora, inversiones).",
+  "dependencies": {
+    "@netlify/blobs": "^11.1.8",
+    "@netlify/functions": "^6.1.1"
+  }
+}

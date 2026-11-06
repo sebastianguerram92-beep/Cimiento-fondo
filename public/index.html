@@ -463,6 +463,8 @@ function vistaAportes(){
   </table></div></section></div>`;
 }
 
+const ultimaCuota = () => { const o = obligacionesOrden(); return o.length ? o[o.length-1] : null; };
+const cuotaDespues = () => { const u = ultimaCuota(); return u ? Number(u.monto) : cfg().aporteProyeccion; };
 function proyeccion(){
   const c = cfg(), T = totalesFondo(), n = Object.keys(S.miembros).length || 9;
   const base = (c.saldoFecha||hoy()).slice(0,7);
@@ -473,7 +475,7 @@ function proyeccion(){
     m++; if(m>12){m=1;y++;}
     const p = y+"-"+String(m).padStart(2,"0");
     const o = S.obligaciones[p];
-    saldo = saldo*(1+r) + n*Number(o ? o.monto : c.aporteProyeccion);
+    saldo = saldo*(1+r) + n*Number(o ? o.monto : cuotaDespues());
     pts.push({p, v:saldo});
   }
   return pts;
@@ -580,7 +582,7 @@ function vistaGeneral(){
       <thead><tr><th>Integrante</th><th class="r">Aportado</th><th class="r">Participación</th><th>Estado</th></tr></thead>
       <tbody>${est.map(({id,m,e})=>`<tr><td>${esc(m.nombre)}${(m.roles||[]).filter(r=>r!=="admin").length?`<br><span class="small muted">${(m.roles||[]).filter(r=>r!=="admin").map(r=>ROL_NOMBRE[r]).join(", ")}</span>`:""}</td><td class="r num">${COP(e.aportado)}</td><td class="r num">${PCT(e.participacion)}</td><td>${chipEstado(e)}</td></tr>`).join("")}</tbody>
     </table></div></section>
-    <section class="card"><div class="row"><div><h2>Historia y proyección</h2><div class="small muted">Aportes acumulados y saldo proyectado con el calendario cargado y ${COP(c.aporteProyeccion)} por persona después.</div></div></div>
+    <section class="card"><div class="row"><div><h2>Historia y proyección</h2><div class="small muted">Aportes acumulados y saldo proyectado con las cuotas del calendario de Gestión${ultimaCuota()?` (hasta ${mesNombre(ultimaCuota().periodo)}, ${COP(ultimaCuota().monto)})`:""}; después se mantiene la última cuota.</div></div></div>
       <div class="row small"><span><span style="display:inline-block;width:18px;height:3px;background:var(--brand);vertical-align:middle"></span> Aportes acumulados</span><span><span style="display:inline-block;width:18px;border-top:2px dashed var(--muted);vertical-align:middle"></span> Saldo proyectado</span></div>
       ${grafico()}
     </section>
@@ -656,7 +658,6 @@ function vistaGestion(){
         <div class="field"><label for="cf-ma">Máx. alternativas %</label><input id="cf-ma" type="number" value="${c.maxAlternativas}"></div>
         <div class="field"><label for="cf-tp">Tasa proyección % E.A.</label><input id="cf-tp" type="number" step="0.1" value="${c.tasaProyeccion}"></div>
         <div class="field" style="grid-column:1/-1"><label for="cf-cta">Cuenta para consignar los aportes</label><input id="cf-cta" value="${esc(c.cuentaAportes||"")}" placeholder="Banco, tipo y número de cuenta, titular"></div>
-        <div class="field"><label for="cf-ap">Aporte proyección</label><input id="cf-ap" inputmode="numeric" value="${c.aporteProyeccion}"></div>
       </div>
       <label class="check"><input id="cf-int" type="checkbox" ${c.interesesActivos?"checked":""}> Cobrar intereses de mora a la tasa de usura</label>
       <button class="btn primary">Guardar reglas</button></form>
@@ -746,7 +747,7 @@ function bind(){
     const saldo = numVal("sd-saldo");
     await put("config","fondo",{...cfg(), saldo, saldoFecha:val("sd-fecha"), posiciones:pos, invertidoAlternativas:pos.filter(x=>x.tipo==="alternativa").reduce((t,x)=>t+saldo*x.pct/100,0)}); toast("Saldo e inversiones actualizados"); });
   on("f-usura", async()=>{ const t=Number(String(val("us-tasa")).replace(",",".")); if(!(t>0&&t<100)){ toast("Escribe la tasa en % E.A., por ejemplo 25,5"); return; } await put("usura", val("us-mes"), {tasaEA:t}); toast("Tasa guardada"); });
-  on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), aporteProyeccion:numVal("cf-ap"), interesesActivos:document.getElementById("cf-int").checked, cuentaAportes:val("cf-cta").trim()}); toast("Reglas guardadas"); });
+  on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), interesesActivos:document.getElementById("cf-int").checked, cuentaAportes:val("cf-cta").trim()}); toast("Reglas guardadas"); });
   on("f-correos", async()=>{
     const norm = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
     const ms = Object.entries(S.miembros), hechos = [], sinMatch = [];

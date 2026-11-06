@@ -127,7 +127,9 @@ svg text{fill:var(--muted);font-family:var(--body)}
 .empty{padding:28px;text-align:center;color:var(--muted)}
 @media (max-width:760px){
   .tabs{display:none}
-  .bottomnav{display:grid;grid-template-columns:repeat(var(--n,4),minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);padding:6px max(8px,env(safe-area-inset-right,0px)) calc(8px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
+  .bottomnav{display:grid;grid-template-columns:repeat(var(--n,4),minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);padding:6px max(8px,env(safe-area-inset-right,0px)) calc(8px + var(--badge,0px) + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px))}
+  :root{--badge:52px} main{padding-bottom:calc(110px + var(--badge))}
+  .toast{bottom:calc(84px + var(--badge) + env(safe-area-inset-bottom,0px))}
   .bottomnav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 0;font-size:11.5px;color:var(--muted);text-decoration:none}
   .bottomnav a[aria-current="page"]{color:var(--brand);font-weight:600}
   h1{font-size:24px}

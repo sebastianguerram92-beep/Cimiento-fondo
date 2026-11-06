@@ -421,7 +421,7 @@ function vistaInicio(){
         <div><span>Intereses de mora por pagar</span><strong class="num">${COP(e.interesPendiente)}</strong></div>
         <div><span>Meses de mora acumulados</span><strong class="num">${e.meses} de ${c.mesesExclusion}</strong></div>
       </div>${e.sinTasa?`<div class="small" style="color:var(--warn-fg)">Falta cargar la tasa de usura de algún mes; los intereses pueden estar incompletos.</div>`:""}</section>
-      <section class="card"><h2>Mis aportes</h2><div class="list">${e.hist.filter((o,i,a)=>{ const k=prox?a.findIndex(x=>x.periodo===prox.periodo):a.length; return i<=k+2; }).reverse().map(o=>`
+      <section class="card"><h2>Mis aportes</h2><div class="list">${e.hist.filter((o,i,a)=>{ const k=prox?a.findIndex(x=>x.periodo===prox.periodo):a.length; return i<=k+2; }).map(o=>`
         <div><span>${mesNombre(o.periodo)}</span><span class="num" style="text-align:right">${COP(o.pagado)} <span class="muted small">/ ${COP(o.monto)}</span><br>${o.falta===0?`<span class="pill ok">Pagado</span>`:o.vencida?`<span class="pill bad">Debe ${COP(o.falta)}</span>`:`<span class="pill n">Pendiente</span>`}</span></div>`).join("") || `<div class="muted">Sin aportes todavía.</div>`}</div></section>
     </div>
     <section class="card"><h2>Si un pago llega tarde</h2><div class="steps small">
@@ -449,7 +449,6 @@ function vistaAportes(){
           <div class="field"><label for="pg-fecha">Fecha de la transferencia</label><input id="pg-fecha" type="date" value="${hoy()}" required></div>
         </div>
         <div class="field"><label for="pg-comp">Pantallazo de la consignación</label><input id="pg-comp" type="file" accept="image/*" required><span class="small muted">${cfg().cuentaAportes?"Consigna a: "+esc(cfg().cuentaAportes)+". ":""}Quien valida los pagos recibe un correo con el pantallazo.</span></div>
-        <div class="field"><label for="pg-ref">Referencia o número de comprobante</label><input id="pg-ref" placeholder="Ej. número de la transferencia"></div>
         <button class="btn primary">Enviar para validación</button>
         <span class="small muted">El gestor lo valida contra el extracto y tus cuotas se asignan al validarlo (cl. 12.4).</span>
       </form>` : `<p class="muted">La gestión todavía no ha publicado el calendario de aportes.</p>`}
@@ -718,7 +717,7 @@ function bind(){
     const btn=document.querySelector("#f-pago button.primary"); if(btn){ btn.disabled=true; btn.textContent="Enviando…"; }
     try {
       const comprobante = await reducirImagen(f);
-      const d = await api("doc/pagos/"+uid(), {method:"PUT", body:{miembro:yo, tipo:val("pg-tipo"), periodo:val("pg-periodo"), monto, fecha:val("pg-fecha"), referencia:val("pg-ref").trim(), comprobante}});
+      const d = await api("doc/pagos/"+uid(), {method:"PUT", body:{miembro:yo, tipo:val("pg-tipo"), periodo:val("pg-periodo"), monto, fecha:val("pg-fecha"), comprobante}});
       toast(d.aviso==="enviado" ? "Pago enviado. Le llegó un correo a quien valida." : "Pago enviado para validación");
     } catch(e){ toast("No se pudo enviar: "+e.message); }
     await cargar(); });

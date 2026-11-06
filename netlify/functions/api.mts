@@ -6,9 +6,9 @@ import { getStore } from "@netlify/blobs";
   Ningún dato real vive en el repositorio: se cargan con /api/importar usando SETUP_KEY.
 
   Variables de entorno:
-    SESSION_SECRET   firma de las sesiones (obligatoria)
-    INVITE_CODE      código del grupo para crear la primera contraseña
-    SETUP_KEY        clave para /api/importar y /api/exportar
+    INVITE_CODE      código del grupo para crear la primera contraseña (obligatoria)
+    SESSION_SECRET   opcional: si falta, se genera una y se guarda en Blobs
+    SETUP_KEY        opcional: sin ella, /api/importar solo funciona con el fondo vacío
     AUTOMATION_KEY   clave para /api/usura-auto (tarea mensual de la tasa de usura)
 */
 
@@ -57,9 +57,22 @@ function igual(a: string, b: string) {
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
+let secretoCache = "";
+async function secretoSesion() {
+  if (env("SESSION_SECRET")) return env("SESSION_SECRET");
+  if (secretoCache) return secretoCache;
+  // Sin variable de entorno: se genera una vez y se guarda en Blobs (nunca sale del servidor).
+  const st = getStore({ name: "cimiento-sistema", consistency: "strong" });
+  let s = (await st.get("session-secret")) as string | null;
+  if (!s) {
+    s = b64u(crypto.getRandomValues(new Uint8Array(48)));
+    await st.set("session-secret", s, { onlyIfNew: true });
+    s = ((await st.get("session-secret")) as string) || s;
+  }
+  return (secretoCache = s);
+}
 async function hmac(data: string) {
-  const secret = env("SESSION_SECRET");
-  if (!secret) throw new Error("Falta SESSION_SECRET");
+  const secret = await secretoSesion();
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return b64u(await crypto.subtle.sign("HMAC", key, enc.encode(data)));
 }
@@ -219,7 +232,9 @@ export default async (req: Request, context: Context) => {
 
     // Carga inicial y respaldo, protegidos con SETUP_KEY.
     if (ruta === "importar" && req.method === "POST") {
-      if (!esClave(req, "x-setup-key", env("SETUP_KEY"))) return error("No autorizado", 401);
+      // Sin SETUP_KEY, solo se permite la carga inicial (cuando aún no hay integrantes).
+      const permitido = env("SETUP_KEY") ? esClave(req, "x-setup-key", env("SETUP_KEY")) : Object.keys(await leer("miembros")).length === 0;
+      if (!permitido) return error("No autorizado", 401);
       const body = await leerBody();
       const hechos: Record<string, number> = {};
       for (const c of COLS) {
@@ -241,10 +256,6 @@ export default async (req: Request, context: Context) => {
       }
       return json({ ok: true, hechos });
     }
-    if (ruta === "exportar" && req.method === "GET") {
-      if (!esClave(req, "x-setup-key", env("SETUP_KEY"))) return error("No autorizado", 401);
-      return json(await estadoCompleto());
-    }
 
     // Tasa de usura desde la tarea mensual automática.
     if (ruta === "usura-auto" && req.method === "POST") {
@@ -261,6 +272,11 @@ export default async (req: Request, context: Context) => {
     // Desde aquí, todo requiere sesión.
     const yo = await usuarioActual(req);
     if (!yo) return error("Sesión vencida", 401);
+
+    if (ruta === "exportar" && req.method === "GET") {
+      if (!tieneRol(yo.m, "admin")) return error("Solo el administrador", 403);
+      return json(await estadoCompleto());
+    }
 
     if (ruta === "estado" && req.method === "GET") return json({ yo: yo.id, ...(await estadoCompleto()) });
 

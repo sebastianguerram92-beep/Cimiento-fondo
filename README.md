@@ -7,19 +7,13 @@ Plataforma del fondo: tablero público del estado del fondo y perfil privado de 
 
 ## Datos
 
-Ningún dato del fondo vive en este repositorio (es público). Los datos están en Netlify Blobs y se cargan con:
-
-```
-curl -X POST https://<sitio>/api/importar -H "x-setup-key: $SETUP_KEY" --data @datos.json
-```
-
-`GET /api/exportar` con la misma clave descarga un respaldo.
+Ningún dato del fondo vive en este repositorio (es público). Los datos están en Netlify Blobs. La carga inicial se hace con `POST /api/importar` mientras el fondo está vacío; después solo con la clave `SETUP_KEY`. Un administrador con sesión puede descargar un respaldo en `GET /api/exportar`.
 
 ## Variables de entorno (Netlify)
 
 | Variable | Uso |
 | --- | --- |
-| `SESSION_SECRET` | Firma de las sesiones |
-| `INVITE_CODE` | Código del grupo para crear la primera contraseña |
-| `SETUP_KEY` | Importar y exportar datos |
+| `INVITE_CODE` | Código del grupo para crear la primera contraseña (obligatoria) |
+| `SESSION_SECRET` | Opcional. Si falta, se genera una y se guarda en Blobs |
+| `SETUP_KEY` | Opcional. Permite reimportar datos cuando el fondo ya tiene integrantes |
 | `AUTOMATION_KEY` | Carga mensual automática de la tasa de usura (`POST /api/usura-auto`) |

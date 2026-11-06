@@ -5,6 +5,10 @@
   "description": "Cimiento: plataforma del fondo de inversión (aportes, mora, inversiones).",
   "dependencies": {
     "@netlify/blobs": "^11.1.8",
-    "@netlify/functions": "^6.1.1"
+    "@netlify/functions": "^6.1.1",
+    "nodemailer": "^10.3.1"
+  },
+  "devDependencies": {
+    "@types/nodemailer": "^8.0.2"
   }
 }

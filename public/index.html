@@ -42,7 +42,7 @@ h1{font-size:28px;letter-spacing:-.01em} h2{font-size:17px} h3{font-size:15px}
 .num{font-variant-numeric:tabular-nums}
 .big{font-family:var(--display);font-weight:600;letter-spacing:-.02em}
 a{color:var(--brand)}
-button,input,select{font:inherit;color:inherit}
+button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:3px solid var(--amber);outline-offset:2px}
 .wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
@@ -84,6 +84,7 @@ form{display:flex;flex-direction:column;gap:12px}
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field label{font-size:13px;font-weight:600}
 .field input,.field select{min-height:46px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--surface);width:100%}
+.field textarea{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface);width:100%;resize:vertical}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px}
 .check{display:flex;gap:10px;align-items:center;min-height:44px}
 .check input{width:20px;height:20px}
@@ -96,6 +97,9 @@ td.r,th.r{text-align:right}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:12px 18px;border-radius:12px;font-weight:600;z-index:20;max-width:calc(100% - 32px)}
 html,body{background:var(--bg)}
 a.btn{text-decoration:none}
+.dlg{border:1px solid var(--line);border-radius:14px;padding:14px;max-width:min(92vw,720px);background:var(--surface);color:var(--fg)}
+.dlg::backdrop{background:rgb(0 0 0 / .5)}
+.dlg img{display:block;max-width:100%;max-height:75vh;margin-top:10px;border-radius:8px}
 .btnlink{white-space:nowrap}
 .login{min-height:100%;display:flex;align-items:center;justify-content:center;padding-block:32px}
 .login .card{width:100%;max-width:440px}
@@ -167,7 +171,8 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8
 /* ---------- Datos ---------- */
 const COLS = ["config","miembros","obligaciones","pagos","usura"];
 const S = { config:{}, miembros:{}, obligaciones:{}, pagos:{}, usura:{} };
-let MODE = "cargando", PUBLICO = true;
+let MODE = "cargando", PUBLICO = true, PORTAFOLIO = null;
+const posiciones = () => { const c = S.config.fondo || {}; return (Array.isArray(c.posiciones) && c.posiciones.length ? c.posiciones : PORTAFOLIO) || []; };
 const TKEY = "cim-token";
 const ls = { get(k){ try{return localStorage.getItem(k)}catch(e){return null} }, set(k,v){ try{ v==null?localStorage.removeItem(k):localStorage.setItem(k,v) }catch(e){} } };
 let token = ls.get(TKEY);
@@ -189,6 +194,7 @@ async function cargar(){
     COLS.forEach(c=>S[c]=data[c]||{});
     // Tasa de usura publicada en el repo por la tarea mensual; lo cargado a mano en Gestión tiene prioridad.
     try { const u = await (await fetch("/usura.json", {cache:"no-store"})).json(); S.usura = {...(u.meses||{}), ...S.usura}; } catch(e){}
+    try { if (!PORTAFOLIO) PORTAFOLIO = (await (await fetch("/portafolio.json", {cache:"no-store"})).json()).posiciones || []; } catch(e){ PORTAFOLIO = PORTAFOLIO || []; }
     if (d) yo = d.yo; else yo = null;
     MODE = "api";
   } catch(e){ if (MODE==="cargando"){ MODE="error"; } }
@@ -281,8 +287,9 @@ function chipEstado(e){
 let yo = null;
 const miembro = id => S.miembros[id];
 const roles = id => (miembro(id)?.roles) || [];
+const verGestion = () => puede("gestor") || puede("supervisor") || puede("validador");
 const puede = r => roles(yo).includes("admin") || roles(yo).includes(r);
-const ROL_NOMBRE = { admin:"Administrador", gestor:"Gestor", supervisor:"Supervisor", coordinador:"Coordinación y actas", legal:"Acompañamiento legal" };
+const ROL_NOMBRE = { admin:"Administrador", gestor:"Gestor", validador:"Valida pagos", supervisor:"Supervisor", coordinador:"Coordinación y actas", legal:"Acompañamiento legal" };
 
 /* ---------- UI ---------- */
 let toastT;
@@ -305,9 +312,9 @@ function render(){
   let r = ruta();
   if (!logueado && !["inicio","entrar"].includes(r)) r = "inicio";
   if (logueado && r === "entrar") r = "mi";
-  if (r === "gestion" && !(puede("gestor")||puede("supervisor"))) r = "inicio";
+  if (r === "gestion" && !verGestion()) r = "inicio";
   const tabs = [["inicio","Inicio"]];
-  if (logueado){ tabs.push(["mi","Mi parte"],["aportes","Aportes"]); if (puede("gestor") || puede("supervisor")) tabs.push(["gestion","Gestión"]); }
+  if (logueado){ tabs.push(["mi","Mi parte"],["aportes","Aportes"]); if (verGestion()) tabs.push(["gestion","Gestión"]); }
   const nav = tabs.map(([k,l])=>`<a href="#${k}" ${k===r?'aria-current="page"':''}>${icon(k)}${l}</a>`).join("");
   const m = logueado ? miembro(yo) : null;
   const sim = ss.get("cim-fecha-sim");
@@ -401,7 +408,7 @@ function vistaInicio(){
         <div><span>Intereses de mora por pagar</span><strong class="num">${COP(e.interesPendiente)}</strong></div>
         <div><span>Meses de mora acumulados</span><strong class="num">${e.meses} de ${c.mesesExclusion}</strong></div>
       </div>${e.sinTasa?`<div class="small" style="color:var(--warn-fg)">Falta cargar la tasa de usura de algún mes; los intereses pueden estar incompletos.</div>`:""}</section>
-      <section class="card"><h2>Mis aportes</h2><div class="list">${e.hist.filter(o=>!prox||o.periodo<=prox.periodo).reverse().map(o=>`
+      <section class="card"><h2>Mis aportes</h2><div class="list">${e.hist.filter((o,i,a)=>{ const k=prox?a.findIndex(x=>x.periodo===prox.periodo):a.length; return i<=k+2; }).reverse().map(o=>`
         <div><span>${mesNombre(o.periodo)}</span><span class="num" style="text-align:right">${COP(o.pagado)} <span class="muted small">/ ${COP(o.monto)}</span><br>${o.falta===0?`<span class="pill ok">Pagado</span>`:o.vencida?`<span class="pill bad">Debe ${COP(o.falta)}</span>`:`<span class="pill n">Pendiente</span>`}</span></div>`).join("") || `<div class="muted">Sin aportes todavía.</div>`}</div></section>
     </div>
     <section class="card"><h2>Si un pago llega tarde</h2><div class="steps small">
@@ -428,6 +435,7 @@ function vistaAportes(){
           <div class="field"><label for="pg-monto">Monto (COP)</label><input id="pg-monto" inputmode="numeric" value="${sugerida?Math.round(sugerida.falta):""}" required></div>
           <div class="field"><label for="pg-fecha">Fecha de la transferencia</label><input id="pg-fecha" type="date" value="${hoy()}" required></div>
         </div>
+        <div class="field"><label for="pg-comp">Pantallazo de la consignación</label><input id="pg-comp" type="file" accept="image/*" required><span class="small muted">${cfg().cuentaAportes?"Consigna a: "+esc(cfg().cuentaAportes)+". ":""}Quien valida los pagos recibe un correo con el pantallazo.</span></div>
         <div class="field"><label for="pg-ref">Referencia o número de comprobante</label><input id="pg-ref" placeholder="Ej. número de la transferencia"></div>
         <button class="btn primary">Enviar para validación</button>
         <span class="small muted">El gestor lo valida contra el extracto y tus cuotas se asignan al validarlo (cl. 12.4).</span>
@@ -435,7 +443,7 @@ function vistaAportes(){
     </section>
     <section class="card"><h2>Mis pagos registrados</h2>
       <div class="list">${mis.map(p=>`<div><span><strong>${p.tipo==="interes"?"Intereses":"Aporte"} · ${mesNombre(p.periodo)}</strong><br><span class="small muted">${fechaLarga(p.fecha)}${p.referencia?" · "+esc(p.referencia):""}</span></span>
-        <span style="text-align:right"><span class="num">${COP(p.monto)}</span><br>${p.estado==="validado"?`<span class="pill ok">Validado</span>`:p.estado==="rechazado"?`<span class="pill bad">Rechazado</span>`:`<span class="pill warn">Por validar</span>`}</span></div>`).join("") || `<div class="muted">Aún no has registrado pagos.</div>`}</div>
+        <span style="text-align:right"><span class="num">${COP(p.monto)}</span><br>${p.comprobante?`<button class="btn small ghost" data-act="ver-comp" data-id="${p.id}" style="min-height:0;padding:2px 6px">Comprobante</button> `:""}${p.estado==="validado"?`<span class="pill ok">Validado</span>`:p.estado==="rechazado"?`<span class="pill bad">Rechazado</span>`:`<span class="pill warn">Por validar</span>`}</span></div>`).join("") || `<div class="muted">Aún no has registrado pagos.</div>`}</div>
     </section>
   </div>
   <section class="card"><h2>Calendario de aportes</h2><div class="tablebox"><table>
@@ -503,10 +511,13 @@ function vistaGeneral(){
   const alDia = est.filter(x=>x.e.meses===0).length;
   const enMora = est.filter(x=>x.e.meses>0 || x.e.interesPendiente>0);
   const vencido = enMora.reduce((s,x)=>s+x.e.pendiente,0), intereses = enMora.reduce((s,x)=>s+x.e.interesPendiente,0);
-  const alt = c.saldo>0 ? (c.invertidoAlternativas||0)/c.saldo*100 : 0;
+  const pos = posiciones();
+  const altValor = pos.length ? pos.filter(x=>x.tipo==="alternativa").reduce((t,x)=>t+(x.valor!=null?Number(x.valor):(c.saldo||0)*Number(x.pct||0)/100),0) : (c.invertidoAlternativas||0);
+  const alt = c.saldo>0 ? altValor/c.saldo*100 : 0;
   const metaPct = c.meta>0 ? Math.min(100, (T.saldo||T.aportado)/c.meta*100) : 0;
   const proy = proyeccion(), last = proy[proy.length-1];
   const co = cobroActual();
+  const proximos = obligacionesOrden().filter(o=>co ? o.periodo > co.periodo : o.vence >= h).slice(0,3).map(o=>({...o, monto:Number(o.monto)}));
   let cobro = `<p class="muted">La gestión aún no ha publicado el calendario.</p>`;
   if (co){
     const pagaron = est.filter(x=>!x.e.hist.find(o=>o.periodo===co.periodo && o.falta>0)).length;
@@ -529,7 +540,9 @@ function vistaGeneral(){
       <div class="card kpi"><span class="lbl">Tasa de usura del mes</span><span class="big num">${tasaUsura(h)!=null?PCT(tasaUsura(h)):"—"}</span><span class="small muted">E.A. · ${mesNombre(h.slice(0,7))}</span></div>
     </div>
     <div class="grid2">
-      <section class="card"><h2>Aportes</h2>${cobro}</section>
+      <section class="card"><h2>Aportes</h2>${cobro}
+        ${proximos.length?`<div class="small muted" style="margin-top:6px">Próximos 3 meses</div><div class="list small">${proximos.map(o=>`<div><span><strong>${mesNombre(o.periodo)}</strong><br><span class="muted">Se paga ${ventana(o)}${o.nota?" · provisional":""}</span></span><span class="num" style="text-align:right">${COP(o.monto)} c/u<br><span class="muted">${COP(o.monto*n)} el fondo</span></span></div>`).join("")}</div>`:""}
+      </section>
       <section class="card"><div class="row"><h2>Mora</h2><span class="pill ${enMora.length?"bad":"ok"}">${enMora.length?enMora.length+" en mora":"Nadie en mora"}</span></div>
         ${enMora.length?`<div class="row small"><span>Vencido <strong class="num">${COP(vencido)}</strong></span><span>Intereses <strong class="num">${COP(intereses)}</strong></span></div>
         <div class="list">${enMora.map(({m,e})=>`<div><span><strong>${esc(m.nombre)}</strong><br><span class="small muted">${e.meses} ${e.meses===1?"mes":"meses"} de ${c.mesesExclusion} · ${COP(e.pendiente)} + ${COP(e.interesPendiente)} intereses</span></span>${e.exclusion?`<span class="pill bad">Causal de exclusión</span>`:`<span class="pill warn">Voto suspendido</span>`}</div>`).join("")}</div>`
@@ -538,9 +551,13 @@ function vistaGeneral(){
       </section>
     </div>
     <div class="grid2">
-      <section class="card"><h2>Inversiones</h2><span class="small muted">Máximo ${c.maxAlternativas}% en alternativas; el resto en renta fija con liquidez.</span>
+      <section class="card"><h2>Inversiones</h2>
+        <div class="small muted">Dónde está el dinero hoy</div>
+        <div class="list">${posiciones().map(x=>{ const v = x.valor!=null ? Number(x.valor) : (T.saldo||0)*Number(x.pct||0)/100; const pct = x.pct!=null ? Number(x.pct) : (T.saldo?v/T.saldo*100:0); return `<div><span><strong>${esc(x.nombre)}</strong><br><span class="small muted">${[x.detalle, x.titular?"A nombre de "+x.titular:"", x.tipo==="alternativa"?"Alternativa":"Renta fija"].filter(Boolean).map(esc).join(" · ")}</span></span><span class="num" style="text-align:right"><strong>${PCT(pct,0)}</strong><br><span class="small muted">${COP(v)}</span></span></div>`; }).join("") || `<div class="muted">Sin posiciones registradas.</div>`}</div>
+        <div class="small muted" style="margin-top:6px">Perfil de riesgo</div>
+        <span class="small muted">Máximo ${c.maxAlternativas}% en alternativas; el resto en renta fija con liquidez.</span>
         <div class="bar" role="img" aria-label="${PCT(alt,0)} en inversiones alternativas"><span style="width:${Math.min(100,alt)}%;background:var(--amber)"></span><i style="left:${c.maxAlternativas}%"></i></div>
-        <div class="row small"><span><strong class="num">${COP(c.invertidoAlternativas||0)}</strong> en alternativas (${PCT(alt,0)})</span><span><strong class="num">${COP(Math.max(0,c.saldo-(c.invertidoAlternativas||0)))}</strong> renta fija y liquidez</span></div>
+        <div class="row small"><span><strong class="num">${COP(altValor)}</strong> en alternativas (${PCT(alt,0)})</span><span><strong class="num">${COP(Math.max(0,c.saldo-altValor))}</strong> renta fija y liquidez</span></div>
         <span class="pill ${alt<=c.maxAlternativas?"ok":"bad"}" style="align-self:flex-start">${alt<=c.maxAlternativas?"Dentro de la política":"Fuera de la política"}</span>
       </section>
       <section class="card"><div class="row"><h2>Camino a ${COP(c.meta)}</h2><span class="small muted num">${PCT(metaPct,0)}</span></div>
@@ -572,7 +589,7 @@ function vistaGestion(){
   <div class="grid2">
     <section class="card"><div class="row"><h2>Pagos por validar</h2><span class="pill ${pend.length?"warn":"ok"}">${pend.length}</span></div>
       <div class="list">${pend.map(p=>`<div style="flex-wrap:wrap"><span><strong>${esc(miembro(p.miembro)?.nombre||"?")}</strong><br><span class="small muted">${p.tipo==="interes"?"Intereses":"Aporte"} ${mesNombre(p.periodo)} · ${fechaLarga(p.fecha)}${p.referencia?" · "+esc(p.referencia):""}</span></span>
-        <span style="display:flex;gap:6px;align-items:center"><span class="num" style="font-weight:600">${COP(p.monto)}</span>${gestor?`<button class="btn small primary" data-act="validar" data-id="${p.id}">Validar</button><button class="btn small danger" data-act="rechazar" data-id="${p.id}">Rechazar</button>`:""}</span></div>`).join("") || `<div class="muted">No hay pagos esperando.</div>`}</div>
+        <span style="display:flex;gap:6px;align-items:center"><span class="num" style="font-weight:600">${COP(p.monto)}</span>${p.comprobante?`<button class="btn small ghost" data-act="ver-comp" data-id="${p.id}">Ver comprobante</button>`:`<span class="small muted">Sin pantallazo</span>`}${(gestor||puede("validador"))?`<button class="btn small primary" data-act="validar" data-id="${p.id}">Validar</button><button class="btn small danger" data-act="rechazar" data-id="${p.id}">Rechazar</button>`:""}</span></div>`).join("") || `<div class="muted">No hay pagos esperando.</div>`}</div>
     </section>
     <section class="card"><h2>Cartera en mora</h2>
       <div class="list">${mora.map(({m,e})=>`<div><span><strong>${esc(m.nombre)}</strong><br><span class="small muted">${e.meses} ${e.meses===1?"mes":"meses"} · vencido ${COP(e.pendiente)} · intereses ${COP(e.interesPendiente)}</span></span>
@@ -592,8 +609,8 @@ function vistaGestion(){
       <form id="f-saldo"><div class="fields">
         <div class="field"><label for="sd-saldo">Saldo según extracto</label><input id="sd-saldo" inputmode="numeric" value="${Math.round(c.saldo)}" required></div>
         <div class="field"><label for="sd-fecha">Fecha de corte</label><input id="sd-fecha" type="date" value="${c.saldoFecha||h}" required></div>
-        <div class="field"><label for="sd-alt">En alternativas</label><input id="sd-alt" inputmode="numeric" value="${Math.round(c.invertidoAlternativas||0)}"></div>
-      </div><button class="btn">Actualizar saldo</button></form>
+      </div>
+      <div class="field"><label for="sd-pos">Dónde está el dinero</label><textarea id="sd-pos" rows="3" placeholder="Una línea por inversión: nombre; a nombre de; renta fija o alternativa; %">${esc(posiciones().map(x=>[x.nombre, x.titular||"", x.tipo==="alternativa"?"alternativa":"renta fija", x.pct!=null?x.pct:""].join("; ")).join("\n"))}</textarea><span class="small muted">Ejemplo: Fiducuenta Bancolombia; Nicolás Otálvaro; renta fija; 100</span></div><button class="btn">Actualizar saldo</button></form>
       <form id="f-usura"><div class="fields">
         <div class="field"><label for="us-mes">Mes</label><input id="us-mes" type="month" value="${h.slice(0,7)}" required></div>
         <div class="field"><label for="us-tasa">Tasa de usura (% E.A.)</label><input id="us-tasa" inputmode="decimal" placeholder="Certificada por la Superfinanciera" required></div>
@@ -611,20 +628,44 @@ function vistaGestion(){
         <div class="field"><label for="cf-pr">Penalidad retiro %</label><input id="cf-pr" type="number" step="0.1" value="${c.penalidadRetiro}"></div>
         <div class="field"><label for="cf-ma">Máx. alternativas %</label><input id="cf-ma" type="number" value="${c.maxAlternativas}"></div>
         <div class="field"><label for="cf-tp">Tasa proyección % E.A.</label><input id="cf-tp" type="number" step="0.1" value="${c.tasaProyeccion}"></div>
+        <div class="field" style="grid-column:1/-1"><label for="cf-cta">Cuenta para consignar los aportes</label><input id="cf-cta" value="${esc(c.cuentaAportes||"")}" placeholder="Banco, tipo y número de cuenta, titular"></div>
         <div class="field"><label for="cf-ap">Aporte proyección</label><input id="cf-ap" inputmode="numeric" value="${c.aporteProyeccion}"></div>
       </div>
       <label class="check"><input id="cf-int" type="checkbox" ${c.interesesActivos?"checked":""}> Cobrar intereses de mora a la tasa de usura</label>
       <button class="btn primary">Guardar reglas</button></form>
     </section>
-    <section class="card"><h2>Integrantes y roles</h2>
-      <div class="tablebox"><table><thead><tr><th>Integrante</th>${Object.keys(ROL_NOMBRE).map(r=>`<th>${ROL_NOMBRE[r].split(" ")[0]}</th>`).join("")}<th></th></tr></thead><tbody>
-      ${ms.map(([id,m])=>`<tr><td>${esc(m.nombre)}<br><span class="small muted">${m.tienePass?"Con contraseña":"Sin contraseña aún"}</span></td>${Object.keys(ROL_NOMBRE).map(r=>`<td><input type="checkbox" aria-label="${ROL_NOMBRE[r]} para ${esc(m.nombre)}" data-act="rol" data-id="${id}" data-rol="${r}" ${(m.roles||[]).includes(r)?"checked":""} ${id===yo&&r==="admin"?"disabled":""} style="width:20px;height:20px"></td>`).join("")}<td>${m.tienePass?`<button class="btn small ghost" data-act="reset" data-id="${id}">Reiniciar clave</button>`:""}</td></tr>`).join("")}
+    <section class="card" style="grid-column:1/-1"><h2>Integrantes y roles</h2>
+      <div class="tablebox"><table><thead><tr><th>Integrante</th>${Object.keys(ROL_NOMBRE).map(r=>`<th>${ROL_NOMBRE[r].split(" ")[0]}</th>`).join("")}<th>Correo</th><th></th></tr></thead><tbody>
+      ${ms.map(([id,m])=>`<tr><td>${esc(m.nombre)}<br><span class="small muted">${m.tienePass?"Con contraseña":"Sin contraseña aún"}</span></td>${Object.keys(ROL_NOMBRE).map(r=>`<td><input type="checkbox" aria-label="${ROL_NOMBRE[r]} para ${esc(m.nombre)}" data-act="rol" data-id="${id}" data-rol="${r}" ${(m.roles||[]).includes(r)?"checked":""} ${id===yo&&r==="admin"?"disabled":""} style="width:20px;height:20px"></td>`).join("")}<td style="min-width:220px"><span style="display:flex;gap:6px"><input id="em-${id}" type="email" value="${esc(m.email||"")}" placeholder="correo@ejemplo.com" aria-label="Correo de ${esc(m.nombre)}" style="min-width:0"><button class="btn small" data-act="email" data-id="${id}">Guardar</button></span></td><td>${m.tienePass?`<button class="btn small ghost" data-act="reset" data-id="${id}">Reiniciar clave</button>`:""}</td></tr>`).join("")}
       </tbody></table></div>
       <form id="f-sim"><div class="fields"><div class="field"><label for="sm-fecha">Probar: ver el fondo como si hoy fuera</label><input id="sm-fecha" type="date" value="${ss.get("cim-fecha-sim")||h}"></div></div>
       <button class="btn">Aplicar fecha de prueba</button></form>
     </section>
   </div>`:""}
   </div>`;
+}
+
+/* ---------- Comprobantes ---------- */
+async function reducirImagen(file){
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok,ko)=>{ const i=new Image(); i.onload=()=>ok(i); i.onerror=()=>ko(new Error("No se pudo leer la imagen")); i.src=url; });
+    const k = Math.min(1, 1600/Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas"); c.width=Math.round(img.naturalWidth*k); c.height=Math.round(img.naturalHeight*k);
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    return c.toDataURL("image/jpeg", 0.82);
+  } finally { URL.revokeObjectURL(url); }
+}
+async function verComprobante(id){
+  try {
+    const res = await fetch("/api/comprobante/"+encodeURIComponent(id), {headers:{authorization:"Bearer "+token}});
+    if(!res.ok) throw new Error("No disponible");
+    const url = URL.createObjectURL(await res.blob());
+    let d = document.getElementById("dlg-comp");
+    if(!d){ d=document.createElement("dialog"); d.id="dlg-comp"; d.className="dlg"; document.body.appendChild(d); d.addEventListener("close",()=>{ const i=d.querySelector("img"); if(i) URL.revokeObjectURL(i.src); }); d.addEventListener("click",e=>{ if(e.target===d) d.close(); }); }
+    d.innerHTML = `<div class="row"><strong>Comprobante</strong><button class="btn small ghost" onclick="this.closest('dialog').close()">Cerrar</button></div><img src="${url}" alt="Pantallazo de la consignación">`;
+    d.showModal();
+  } catch(e){ toast("No se pudo abrir el comprobante"); }
 }
 
 /* ---------- Eventos ---------- */
@@ -638,11 +679,24 @@ function bind(){
   const on = (id, fn) => { const f=document.getElementById(id); if(f) f.addEventListener("submit", ev=>{ ev.preventDefault(); fn(); }); };
   on("f-login", async()=>{ try { const d = await api("entrar",{method:"POST", body:{id:loginSel, pass:val("lg-pass")}}); token=d.token; ls.set(TKEY,token); loginMsg=""; location.hash="#mi"; await cargar(); } catch(e){ loginMsg=e.message; render(); } });
   on("f-crear", async()=>{ if(val("cp-1")!==val("cp-2")){ loginMsg="Las dos contraseñas no coinciden."; render(); return; } try { const d = await api("crear-clave",{method:"POST", body:{id:loginSel, pass:val("cp-1"), codigo:val("cp-cod")}}); token=d.token; ls.set(TKEY,token); loginMsg=""; location.hash="#mi"; await cargar(); toast("Contraseña creada"); } catch(e){ loginMsg=e.message; render(); } });
-  on("f-pago", async()=>{ const monto=numVal("pg-monto"); if(!(monto>0)){ toast("Escribe un monto válido"); return; } await put("pagos", uid(), {miembro:yo, tipo:val("pg-tipo"), periodo:val("pg-periodo"), monto, fecha:val("pg-fecha"), referencia:val("pg-ref").trim(), estado:"pendiente", creado:new Date().toISOString()}); toast("Pago enviado para validación"); });
+  on("f-pago", async()=>{ const monto=numVal("pg-monto"); if(!(monto>0)){ toast("Escribe un monto válido"); return; }
+    const f=document.getElementById("pg-comp").files[0]; if(!f){ toast("Sube el pantallazo de la consignación"); return; }
+    const btn=document.querySelector("#f-pago button.primary"); if(btn){ btn.disabled=true; btn.textContent="Enviando…"; }
+    try {
+      const comprobante = await reducirImagen(f);
+      const d = await api("doc/pagos/"+uid(), {method:"PUT", body:{miembro:yo, tipo:val("pg-tipo"), periodo:val("pg-periodo"), monto, fecha:val("pg-fecha"), referencia:val("pg-ref").trim(), comprobante}});
+      toast(d.aviso==="enviado" ? "Pago enviado. Le llegó un correo a quien valida." : "Pago enviado para validación");
+    } catch(e){ toast("No se pudo enviar: "+e.message); }
+    await cargar(); });
   on("f-obl", async()=>{ const p=val("ob-periodo"), monto=numVal("ob-monto"); if(!p||!(monto>0)) return; await put("obligaciones", p, {periodo:p, monto, vence:val("ob-vence")}); toast("Aporte de "+mesNombre(p)+" publicado"); });
-  on("f-saldo", async()=>{ await put("config","fondo",{...cfg(), saldo:numVal("sd-saldo"), saldoFecha:val("sd-fecha"), invertidoAlternativas:numVal("sd-alt")||0}); toast("Saldo actualizado"); });
+  on("f-saldo", async()=>{
+    const pos = String(val("sd-pos")||"").split("\n").map(l=>l.split(";").map(x=>x.trim())).filter(p=>p[0]).map(([nombre,titular,tipo,pct])=>({nombre, titular:titular||"", tipo:/altern/i.test(tipo||"")?"alternativa":"renta fija", pct:Number(String(pct||"").replace(",","."))||0}));
+    const total = pos.reduce((t,x)=>t+x.pct,0);
+    if (pos.length && Math.abs(total-100)>0.5){ toast("Los porcentajes deben sumar 100% (suman "+NUM(total)+"%)"); return; }
+    const saldo = numVal("sd-saldo");
+    await put("config","fondo",{...cfg(), saldo, saldoFecha:val("sd-fecha"), posiciones:pos, invertidoAlternativas:pos.filter(x=>x.tipo==="alternativa").reduce((t,x)=>t+saldo*x.pct/100,0)}); toast("Saldo e inversiones actualizados"); });
   on("f-usura", async()=>{ const t=Number(String(val("us-tasa")).replace(",",".")); if(!(t>0&&t<100)){ toast("Escribe la tasa en % E.A., por ejemplo 25,5"); return; } await put("usura", val("us-mes"), {tasaEA:t}); toast("Tasa guardada"); });
-  on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), aporteProyeccion:numVal("cf-ap"), interesesActivos:document.getElementById("cf-int").checked}); toast("Reglas guardadas"); });
+  on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), aporteProyeccion:numVal("cf-ap"), interesesActivos:document.getElementById("cf-int").checked, cuentaAportes:val("cf-cta").trim()}); toast("Reglas guardadas"); });
   on("f-sim", ()=>{ const d=val("sm-fecha"); ss.set("cim-fecha-sim", d && d!==hoyReal() ? d : null); render(); toast("Fecha de prueba aplicada"); });
 }
 async function onAct(ev){
@@ -650,6 +704,8 @@ async function onAct(ev){
   if (a==="pick"){ loginSel=id; loginMsg=""; render(); const f=document.getElementById("lg-pass")||document.getElementById("cp-1"); if(f) f.focus(); }
   else if (a==="salir"){ salir(); loginSel=null; location.hash="#inicio"; await cargar(); }
   else if (a==="cargar-datos"){ const f=document.getElementById("carga-archivo").files[0]; if(!f){ toast("Elige el archivo"); return; } try { const body=JSON.parse(await f.text()); const d=await api("importar",{method:"POST", body}); loginMsg=""; toast("Datos cargados: "+(d.hechos.miembros||0)+" integrantes"); await cargar(); } catch(e){ loginMsg="No se pudo cargar: "+e.message; render(); } }
+  else if (a==="ver-comp"){ verComprobante(id); }
+  else if (a==="email"){ const v=(document.getElementById("em-"+id)||{}).value||""; await put("miembros", id, {...miembro(id), email:v.trim()}); toast("Correo guardado"); }
   else if (a==="recargar"){ MODE="cargando"; await cargar(); }
   else if (a==="sim-off"){ ss.set("cim-fecha-sim",null); render(); }
   else if (a==="validar"||a==="rechazar"){ const p=S.pagos[id]; await put("pagos", id, {...p, estado: a==="validar"?"validado":"rechazado", validadoPor:yo, validadoEn:new Date().toISOString()}); toast(a==="validar"?"Pago validado":"Pago rechazado"); }

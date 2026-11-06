@@ -1,0 +1,6 @@
+{
+  "nota": "Dónde está invertido hoy el patrimonio del fondo. Lo que el administrador guarde en Gestión tiene prioridad sobre este archivo.",
+  "posiciones": [
+    { "nombre": "Fiducuenta Bancolombia", "titular": "Nicolás Otálvaro", "tipo": "renta fija", "detalle": "Fondo de inversión colectiva a la vista", "pct": 100 }
+  ]
+}

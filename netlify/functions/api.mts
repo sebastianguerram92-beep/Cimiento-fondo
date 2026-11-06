@@ -1,5 +1,6 @@
 import type { Config, Context } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
+import nodemailer from "nodemailer";
 
 /*
   API de Cimiento. Los datos viven en Netlify Blobs (store "cimiento"), un blob JSON por colección.
@@ -10,6 +11,9 @@ import { getStore } from "@netlify/blobs";
     SESSION_SECRET   opcional: si falta, se genera una y se guarda en Blobs
     SETUP_KEY        opcional: sin ella, /api/importar solo funciona con el fondo vacío
     AUTOMATION_KEY   clave para /api/usura-auto (tarea mensual de la tasa de usura)
+    GMAIL_USER       opcional: cuenta de Gmail que envía los avisos de pagos por validar
+    GMAIL_APP_PASSWORD  opcional: contraseña de aplicación de esa cuenta de Gmail
+    SITE_URL         opcional: link del sitio para los correos (por defecto URL de Netlify)
 */
 
 const COLS = ["config", "miembros", "obligaciones", "pagos", "usura"] as const;
@@ -18,6 +22,8 @@ type Doc = Record<string, any>;
 type Data = Record<string, Doc>;
 
 const store = () => getStore({ name: "cimiento", consistency: "strong" });
+const comprobantes = () => getStore({ name: "cimiento-comprobantes", consistency: "strong" });
+const MAX_COMPROBANTE = 3 * 1024 * 1024;
 const env = (k: string) => Netlify.env.get(k) || "";
 
 async function leer(col: Col): Promise<Data> {
@@ -119,7 +125,32 @@ async function estadoCompleto() {
 }
 
 /* ---------- Reglas de escritura ---------- */
-const CAMPOS_SALDO = ["saldo", "saldoFecha", "invertidoAlternativas"];
+const CAMPOS_SALDO = ["saldo", "saldoFecha", "invertidoAlternativas", "posiciones"];
+
+const avisos: Array<() => Promise<boolean>> = [];
+const cop = (n: number) => "$" + Math.round(n).toLocaleString("es-CO");
+const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+const mesNombre = (p: string) => { const [y, m] = p.split("-").map(Number); return `${MESES[m - 1] || p} ${y}`; };
+
+// Correo a quienes validan pagos (gestor o administrador con email registrado).
+async function avisarPago(miembros: Data, id: string, pago: Doc, comprobante: { bytes: Uint8Array; tipo: string } | null) {
+  const user = env("GMAIL_USER"), pass = env("GMAIL_APP_PASSWORD");
+  if (!user || !pass) return false;
+  const destinos = Object.values(miembros).filter((m) => m.email && ((m.roles || []).includes("validador") || (m.roles || []).includes("gestor"))).map((m) => m.email);
+  if (!destinos.length) return false;
+  const quien = miembros[pago.miembro]?.nombre || pago.miembro;
+  const sitio = env("SITE_URL") || env("URL") || "https://cimiento-fondo.netlify.app";
+  const tipo = pago.tipo === "interes" ? "intereses de mora" : "aporte";
+  const t = nodemailer.createTransport({ service: "gmail", auth: { user, pass } });
+  await t.sendMail({
+    from: `Cimiento <${user}>`,
+    to: destinos.join(", "),
+    subject: `Pago por validar: ${quien}, ${cop(pago.monto)} (${mesNombre(pago.periodo)})`,
+    text: `${quien} registró un pago de ${tipo} de ${mesNombre(pago.periodo)} por ${cop(pago.monto)}, transferido el ${pago.fecha}${pago.referencia ? " (ref. " + pago.referencia + ")" : ""}.\n\nRevisa que el dinero haya entrado a la cuenta y valídalo o recházalo en ${sitio}/#gestion\n\n${comprobante ? "El pantallazo de la consignación va adjunto." : "No adjuntó pantallazo."}`,
+    attachments: comprobante ? [{ filename: `comprobante-${id}.${comprobante.tipo.split("/")[1]}`, content: Buffer.from(comprobante.bytes), contentType: comprobante.tipo }] : [],
+  });
+  return true;
+}
 
 async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, id: string, body: Doc) {
   const admin = tieneRol(yo.m, "admin");
@@ -132,6 +163,15 @@ async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, 
       if (body.miembro !== yo.id && !gestor) return "Solo puedes registrar tus propios pagos";
       const monto = Number(body.monto);
       if (!(monto > 0)) return "Monto inválido";
+      let comprobante: { bytes: Uint8Array; tipo: string } | null = null;
+      if (body.comprobante) {
+        const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.comprobante));
+        if (!m) return "El comprobante debe ser una imagen";
+        const bytes = new Uint8Array(Buffer.from(m[2], "base64"));
+        if (bytes.length > MAX_COMPROBANTE) return "La imagen del comprobante es muy grande";
+        comprobante = { bytes, tipo: m[1] };
+      }
+      if (comprobante) await comprobantes().set(id, comprobante.bytes, { metadata: { tipo: comprobante.tipo, miembro: body.miembro } });
       data[id] = {
         miembro: body.miembro,
         tipo: body.tipo === "interes" ? "interes" : "aporte",
@@ -142,9 +182,11 @@ async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, 
         estado: gestor && body.estado === "validado" ? "validado" : "pendiente",
         creado: new Date().toISOString(),
         creadoPor: yo.id,
+        comprobante: !!comprobante,
       };
+      if (data[id].estado === "pendiente") avisos.push(() => avisarPago(yo.miembros, id, data[id], comprobante));
     } else {
-      if (!gestor) return "Solo el gestor valida pagos";
+      if (!gestor && !tieneRol(yo.m, "validador")) return "Solo quien valida pagos puede hacerlo";
       if (!["pendiente", "validado", "rechazado"].includes(body.estado)) return "Estado inválido";
       data[id] = { ...previo, estado: body.estado, validadoPor: yo.id, validadoEn: new Date().toISOString() };
     }
@@ -278,7 +320,22 @@ export default async (req: Request, context: Context) => {
       return json(await estadoCompleto());
     }
 
-    if (ruta === "estado" && req.method === "GET") return json({ yo: yo.id, ...(await estadoCompleto()) });
+    if (ruta === "estado" && req.method === "GET") {
+      const e = await estadoCompleto();
+      if (!tieneRol(yo.m, "admin"))
+        e.miembros = Object.fromEntries(Object.entries(e.miembros).map(([id, m]) => { const { email, ...resto } = m; return [id, id === yo.id ? m : resto]; }));
+      return json({ yo: yo.id, ...e });
+    }
+
+    if (ruta === "comprobante" && partes[1] && req.method === "GET") {
+      const id = partes[1];
+      const pago = (await leer("pagos"))[id];
+      if (!pago || !idValido(id)) return error("No existe", 404);
+      if (pago.miembro !== yo.id && !["gestor", "supervisor", "validador"].some((r) => tieneRol(yo.m, r))) return error("Sin permiso", 403);
+      const r = await comprobantes().getWithMetadata(id, { type: "arrayBuffer" });
+      if (!r) return error("Sin comprobante", 404);
+      return new Response(r.data as ArrayBuffer, { headers: { "content-type": String(r.metadata?.tipo || "image/jpeg"), "cache-control": "private, no-store" } });
+    }
 
     if (ruta === "clave" && req.method === "POST") {
       const { actual, nueva } = await leerBody();
@@ -306,8 +363,14 @@ export default async (req: Request, context: Context) => {
       const col = partes[1] as Col, id = partes[2];
       if (!COLS.includes(col) || !idValido(id)) return error("Ruta inválida", 404);
       if (req.method === "PUT") {
+        avisos.length = 0;
         const msg = await guardarDoc(yo, col, id, await leerBody());
-        return msg ? error(msg, 403) : json({ ok: true });
+        if (msg) return error(msg, 403);
+        let aviso = "";
+        for (const a of avisos.splice(0)) {
+          try { aviso = (await a()) ? "enviado" : "sin-correo"; } catch (e: any) { console.error("Aviso de pago", e); aviso = "fallo"; }
+        }
+        return json({ ok: true, aviso });
       }
       if (req.method === "DELETE") {
         if (!["obligaciones", "usura"].includes(col) || !tieneRol(yo.m, "gestor")) return error("Sin permiso", 403);

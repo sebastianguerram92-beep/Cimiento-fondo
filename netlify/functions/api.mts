@@ -174,6 +174,10 @@ async function guardarEnDrive(miembros: Data, id: string, pago: Doc, comprobante
     redirect: "follow",
   });
   if (!res.ok) throw new Error("Drive respondió " + res.status);
+  const out = await res.json().catch(() => ({}));
+  if (!out.ok) throw new Error("Drive: " + (out.error || "sin respuesta"));
+  const pagos = await leer("pagos");
+  if (pagos[id]) { pagos[id].enDrive = true; await escribir("pagos", pagos); }
 }
 
 async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, id: string, body: Doc) {
@@ -371,6 +375,23 @@ export default async (req: Request, context: Context) => {
       miembros[yo.id].sesionV = (miembros[yo.id].sesionV || 0) + 1;
       await escribir("miembros", miembros);
       return json({ token: await crearToken(yo.id, miembros[yo.id].sesionV) });
+    }
+
+    // Envía a Drive los comprobantes que aún no estén allá (por ejemplo, los subidos antes de conectar Drive).
+    if (ruta === "drive-sincronizar" && req.method === "POST") {
+      if (!tieneRol(yo.m, "admin")) return error("Solo el administrador", 403);
+      if (!env("DRIVE_WEBHOOK_URL")) return error("Drive aún no está conectado (falta DRIVE_WEBHOOK_URL en Netlify)");
+      const pendientes = Object.entries(await leer("pagos")).filter(([, p]) => p.comprobante && !p.enDrive);
+      let ok = 0, fallos = 0;
+      for (const [id, p] of pendientes.slice(0, 20)) {
+        try {
+          const r = await comprobantes().getWithMetadata(id, { type: "arrayBuffer" });
+          if (!r) continue;
+          await guardarEnDrive(yo.miembros, id, p, { bytes: new Uint8Array(r.data as ArrayBuffer), tipo: String(r.metadata?.tipo || "image/jpeg") });
+          ok++;
+        } catch (e) { console.error("Drive", e); fallos++; }
+      }
+      return json({ ok, fallos, quedan: Math.max(0, pendientes.length - 20) });
     }
 
     if (ruta === "reiniciar-clave" && req.method === "POST") {

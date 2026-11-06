@@ -298,6 +298,7 @@ function render(){
   const active = document.activeElement && document.activeElement.id;
   if (MODE === "cargando") return;
   if (MODE === "error"){ app.innerHTML = `<div class="wrap login"><div class="card"><div class="logo">${LOGO(30)}cimiento</div><h1>No pudimos cargar el fondo</h1><p class="muted">Revisa tu conexión y vuelve a intentarlo.</p><button class="btn primary" data-act="recargar">Reintentar</button></div></div>`; bind(); return; }
+  if (!Object.keys(S.miembros).length){ app.innerHTML = vistaCarga(); bind(); return; }
   const logueado = !!(yo && miembro(yo));
   let r = ruta();
   if (!logueado && !["inicio","entrar"].includes(r)) r = "inicio";
@@ -324,6 +325,14 @@ function render(){
   if (active){ const el=document.getElementById(active); if(el) el.focus(); }
 }
 
+function vistaCarga(){
+  return `<div class="wrap login"><div class="card" style="gap:16px"><div class="logo">${LOGO(30)}cimiento</div>
+    <div><h1>Carga inicial del fondo</h1><p class="muted small" style="margin:4px 0 0">El fondo aún no tiene datos. Sube el archivo de datos que te compartió Claude (cimiento-datos.json). Esto solo funciona una vez, mientras el fondo está vacío.</p></div>
+    <div class="field"><label for="carga-archivo">Archivo de datos</label><input id="carga-archivo" type="file" accept="application/json,.json"></div>
+    <button class="btn primary" data-act="cargar-datos">Cargar datos</button>
+    ${loginMsg?`<div class="alert bad" role="alert">${esc(loginMsg)}</div>`:""}
+  </div></div>`;
+}
 function vistaLogin(){
   const ms = Object.entries(S.miembros).sort((a,b)=>a[1].nombre.localeCompare(b[1].nombre));
   const sel = loginSel && miembro(loginSel);
@@ -638,6 +647,7 @@ async function onAct(ev){
   const el = ev.currentTarget, a = el.dataset.act, id = el.dataset.id;
   if (a==="pick"){ loginSel=id; loginMsg=""; render(); const f=document.getElementById("lg-pass")||document.getElementById("cp-1"); if(f) f.focus(); }
   else if (a==="salir"){ salir(); loginSel=null; location.hash="#inicio"; await cargar(); }
+  else if (a==="cargar-datos"){ const f=document.getElementById("carga-archivo").files[0]; if(!f){ toast("Elige el archivo"); return; } try { const body=JSON.parse(await f.text()); const d=await api("importar",{method:"POST", body}); loginMsg=""; toast("Datos cargados: "+(d.hechos.miembros||0)+" integrantes"); await cargar(); } catch(e){ loginMsg="No se pudo cargar: "+e.message; render(); } }
   else if (a==="recargar"){ MODE="cargando"; await cargar(); }
   else if (a==="sim-off"){ ss.set("cim-fecha-sim",null); render(); }
   else if (a==="validar"||a==="rechazar"){ const p=S.pagos[id]; await put("pagos", id, {...p, estado: a==="validar"?"validado":"rechazado", validadoPor:yo, validadoEn:new Date().toISOString()}); toast(a==="validar"?"Pago validado":"Pago rechazado"); }

@@ -638,6 +638,8 @@ function vistaGestion(){
       <div class="tablebox"><table><thead><tr><th>Integrante</th>${Object.keys(ROL_NOMBRE).map(r=>`<th>${ROL_NOMBRE[r].split(" ")[0]}</th>`).join("")}<th>Correo</th><th></th></tr></thead><tbody>
       ${ms.map(([id,m])=>`<tr><td>${esc(m.nombre)}<br><span class="small muted">${m.tienePass?"Con contraseña":"Sin contraseña aún"}</span></td>${Object.keys(ROL_NOMBRE).map(r=>`<td><input type="checkbox" aria-label="${ROL_NOMBRE[r]} para ${esc(m.nombre)}" data-act="rol" data-id="${id}" data-rol="${r}" ${(m.roles||[]).includes(r)?"checked":""} ${id===yo&&r==="admin"?"disabled":""} style="width:20px;height:20px"></td>`).join("")}<td style="min-width:220px"><span style="display:flex;gap:6px"><input id="em-${id}" type="email" value="${esc(m.email||"")}" placeholder="correo@ejemplo.com" aria-label="Correo de ${esc(m.nombre)}" style="min-width:0"><button class="btn small" data-act="email" data-id="${id}">Guardar</button></span></td><td>${m.tienePass?`<button class="btn small ghost" data-act="reset" data-id="${id}">Reiniciar clave</button>`:""}</td></tr>`).join("")}
       </tbody></table></div>
+      <form id="f-correos"><div class="field"><label for="cr-lista">Pegar correos de varios integrantes a la vez</label><textarea id="cr-lista" rows="4" placeholder="Pega la lista tal cual: una línea por persona, con su nombre y su correo"></textarea><span class="small muted">Busca en cada línea un nombre de integrante y un correo, y los guarda juntos.</span></div>
+      <button class="btn">Guardar correos</button></form>
       <form id="f-sim"><div class="fields"><div class="field"><label for="sm-fecha">Probar: ver el fondo como si hoy fuera</label><input id="sm-fecha" type="date" value="${ss.get("cim-fecha-sim")||h}"></div></div>
       <button class="btn">Aplicar fecha de prueba</button></form>
     </section>
@@ -697,6 +699,21 @@ function bind(){
     await put("config","fondo",{...cfg(), saldo, saldoFecha:val("sd-fecha"), posiciones:pos, invertidoAlternativas:pos.filter(x=>x.tipo==="alternativa").reduce((t,x)=>t+saldo*x.pct/100,0)}); toast("Saldo e inversiones actualizados"); });
   on("f-usura", async()=>{ const t=Number(String(val("us-tasa")).replace(",",".")); if(!(t>0&&t<100)){ toast("Escribe la tasa en % E.A., por ejemplo 25,5"); return; } await put("usura", val("us-mes"), {tasaEA:t}); toast("Tasa guardada"); });
   on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), aporteProyeccion:numVal("cf-ap"), interesesActivos:document.getElementById("cf-int").checked, cuentaAportes:val("cf-cta").trim()}); toast("Reglas guardadas"); });
+  on("f-correos", async()=>{
+    const norm = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+    const ms = Object.entries(S.miembros), hechos = [], sinMatch = [];
+    for (const linea of String(val("cr-lista")||"").split("\n")){
+      const em = (linea.match(/[^\s:;,<>()`"']+@[^\s:;,<>()`"']+\.[a-z]{2,}/i)||[])[0]; if(!em) continue;
+      const l = norm(linea.replace(em,""));
+      const cand = ms.filter(([id,m])=>{ const p = norm(m.nombre).split(/\s+/); return p.length>1 ? l.includes(p[0]) && l.includes(p[p.length-1]) : l.includes(p[0]); });
+      if (cand.length===1) hechos.push([cand[0][0], em.toLowerCase()]); else sinMatch.push(em);
+    }
+    if (!hechos.length){ toast("No encontré nombres de integrantes con correo en el texto"); return; }
+    let err = 0;
+    for (const [id,em] of hechos){ try { await api("doc/miembros/"+id, {method:"PUT", body:{...miembro(id), email:em}}); } catch(e){ err++; } }
+    await cargar();
+    toast(`Guardé ${hechos.length-err} correo${hechos.length-err===1?"":"s"}`+(sinMatch.length?`. Sin nombre reconocido: ${sinMatch.join(", ")}`:"")+(err?`. Fallaron ${err}`:""));
+  });
   on("f-sim", ()=>{ const d=val("sm-fecha"); ss.set("cim-fecha-sim", d && d!==hoyReal() ? d : null); render(); toast("Fecha de prueba aplicada"); });
 }
 async function onAct(ev){

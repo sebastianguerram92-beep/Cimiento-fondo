@@ -187,6 +187,8 @@ async function cargar(){
     const data = d || await api("publico");
     PUBLICO = !d;
     COLS.forEach(c=>S[c]=data[c]||{});
+    // Tasa de usura publicada en el repo por la tarea mensual; lo cargado a mano en Gestión tiene prioridad.
+    try { const u = await (await fetch("/usura.json", {cache:"no-store"})).json(); S.usura = {...(u.meses||{}), ...S.usura}; } catch(e){}
     if (d) yo = d.yo; else yo = null;
     MODE = "api";
   } catch(e){ if (MODE==="cargando"){ MODE="error"; } }

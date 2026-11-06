@@ -1,0 +1,7 @@
+{
+  "nota": "Tasa de usura para crédito de consumo y ordinario (% efectivo anual), certificada mensualmente por la Superintendencia Financiera. La actualiza una tarea automática el día 1 de cada mes.",
+  "meses": {
+    "2026-08": { "tasaEA": 29.66, "ibc": 19.77, "fuente": "Superfinanciera", "url": "https://www.superfinanciera.gov.co/publicaciones/10116205/superfinanciera-certifica-el-interes-bancario-corriente/" },
+    "2026-11": { "tasaEA": 28.34, "ibc": 18.89, "fuente": "Superfinanciera, certificación de noviembre 2026 (Portafolio)" }
+  }
+}

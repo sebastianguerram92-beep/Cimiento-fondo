@@ -13,6 +13,7 @@ import nodemailer from "nodemailer";
     AUTOMATION_KEY   clave para /api/usura-auto (tarea mensual de la tasa de usura)
     GMAIL_USER       opcional: cuenta de Gmail que envía los avisos de pagos por validar
     GMAIL_APP_PASSWORD  opcional: contraseña de aplicación de esa cuenta de Gmail
+    DRIVE_WEBHOOK_URL  opcional: URL de la app web de Apps Script que guarda los comprobantes en Drive (ver drive/README.md)
     SITE_URL         opcional: link del sitio para los correos (por defecto URL de Netlify)
 */
 
@@ -152,6 +153,29 @@ async function avisarPago(miembros: Data, id: string, pago: Doc, comprobante: { 
   return true;
 }
 
+// Copia del comprobante en Drive: <carpeta raíz>/<Integrante>/Aporte N/archivo
+async function guardarEnDrive(miembros: Data, id: string, pago: Doc, comprobante: { bytes: Uint8Array; tipo: string }) {
+  const url = env("DRIVE_WEBHOOK_URL");
+  if (!url) return;
+  const periodos = Object.keys(await leer("obligaciones")).sort();
+  const n = periodos.indexOf(pago.periodo) + 1;
+  const integrante = miembros[pago.miembro]?.nombre || pago.miembro;
+  const ext = comprobante.tipo.split("/")[1] === "jpeg" ? "jpg" : comprobante.tipo.split("/")[1];
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({
+      integrante,
+      carpeta: n > 0 ? `Aporte ${n}` : `Aporte ${pago.periodo}`,
+      nombreArchivo: `${pago.tipo === "interes" ? "Intereses" : "Aporte"} ${n > 0 ? n : ""} ${mesNombre(pago.periodo)} - ${pago.fecha} - ${id}.${ext}`.replace(/\s+/g, " "),
+      mime: comprobante.tipo,
+      archivo: Buffer.from(comprobante.bytes).toString("base64"),
+    }),
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error("Drive respondió " + res.status);
+}
+
 async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, id: string, body: Doc) {
   const admin = tieneRol(yo.m, "admin");
   const gestor = tieneRol(yo.m, "gestor");
@@ -185,6 +209,7 @@ async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, 
         comprobante: !!comprobante,
       };
       if (data[id].estado === "pendiente") avisos.push(() => avisarPago(yo.miembros, id, data[id], comprobante));
+      if (comprobante) avisos.push(() => guardarEnDrive(yo.miembros, id, data[id], comprobante).then(() => false));
     } else {
       if (!gestor && !tieneRol(yo.m, "validador")) return "Solo quien valida pagos puede hacerlo";
       if (!["pendiente", "validado", "rechazado"].includes(body.estado)) return "Estado inválido";
@@ -368,7 +393,7 @@ export default async (req: Request, context: Context) => {
         if (msg) return error(msg, 403);
         let aviso = "";
         for (const a of avisos.splice(0)) {
-          try { aviso = (await a()) ? "enviado" : "sin-correo"; } catch (e: any) { console.error("Aviso de pago", e); aviso = "fallo"; }
+          try { if (await a()) aviso = "enviado"; else if (!aviso) aviso = "sin-correo"; } catch (e: any) { console.error("Aviso de pago", e); if (aviso !== "enviado") aviso = "fallo"; }
         }
         return json({ ok: true, aviso });
       }

@@ -83,9 +83,13 @@ main{padding-block:22px 110px}
 form{display:flex;flex-direction:column;gap:12px}
 .field{display:flex;flex-direction:column;gap:5px;min-width:0}
 .field label{font-size:13px;font-weight:600}
-.field input,.field select{min-height:46px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--surface);width:100%}
+.field input,.field select{min-height:46px;border:1px solid var(--line);border-radius:10px;padding:0 12px;background:var(--surface);width:100%;min-width:0;max-width:100%;box-sizing:border-box}
+.field input[type=month],.field input[type=date]{-webkit-appearance:none;appearance:none;display:block;line-height:44px;text-align:left}
+.field input::-webkit-date-and-time-value{text-align:left}
 .field textarea{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--surface);width:100%;resize:vertical}
 .fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:12px}
+.fields>*{min-width:0}
+@media (max-width:560px){.fields{grid-template-columns:1fr}}
 .check{display:flex;gap:10px;align-items:center;min-height:44px}
 .check input{width:20px;height:20px}
 .tablebox{overflow-x:auto;margin:0 -4px}
@@ -594,6 +598,8 @@ function vistaGestion(){
   const admin = puede("admin"), gestor = puede("gestor");
   const prox6 = obls.filter(o=>o.vence >= h).slice(0,6);
   const obMes = (prox6[0]||{}).periodo || sig;
+  const prox = obls.filter(o=>o.vence >= h).slice(0,18);
+  const prDesde = (obls.find(o=>o.nota && o.vence >= h)||{}).periodo || sigMes(obMes);
   return `<div class="stack"><h1>Gestión</h1>
   <div class="grid2">
     <section class="card"><div class="row"><h2>Pagos por validar</h2><span class="pill ${pend.length?"warn":"ok"}">${pend.length}</span></div>
@@ -614,8 +620,17 @@ function vistaGestion(){
       </div>
       <label class="check"><input id="ob-adelante" type="checkbox"> Aplicar esta cuota también a todos los meses siguientes ya cargados</label>
       <button class="btn primary">Guardar cuota</button></form>
+      <form id="f-proy"><div class="small" style="font-weight:600">Proyectar aumento automático</div>
+        <span class="small muted">Calcula cada mes subiendo la cuota un porcentaje sobre el mes anterior y la guarda en el calendario.</span>
+        <div class="fields">
+          <div class="field"><label for="pr-desde">Desde</label><input id="pr-desde" type="month" value="${prDesde}" required></div>
+          <div class="field"><label for="pr-hasta">Hasta</label><input id="pr-hasta" type="month" value="2027-12" required></div>
+          <div class="field"><label for="pr-pct">Aumento mensual (%)</label><input id="pr-pct" inputmode="decimal" value="10" required></div>
+        </div>
+        <div id="pr-vista" class="small muted"></div>
+        <button class="btn primary">Proyectar cuotas</button></form>
       <div class="small muted">Próximos meses</div>
-      <div class="list small">${prox6.map(o=>`<div><span><strong>${mesNombre(o.periodo)}</strong><br><span class="muted">Se paga ${ventana(o)}</span></span><span class="num" style="text-align:right">${COP(o.monto)}<br><button class="btn small ghost" data-act="del-obl" data-id="${o.id}" aria-label="Quitar ${mesNombre(o.periodo)}" style="min-height:0;padding:2px 6px">Quitar</button></span></div>`).join("")}</div>
+      <div class="list small">${prox.map(o=>`<div><span><strong>${mesNombre(o.periodo)}</strong><br><span class="muted">Se paga ${ventana(o)}</span></span><span class="num" style="text-align:right">${COP(o.monto)}<br><button class="btn small ghost" data-act="del-obl" data-id="${o.id}" aria-label="Quitar ${mesNombre(o.periodo)}" style="min-height:0;padding:2px 6px">Quitar</button></span></div>`).join("")}</div>
     </section>
     <section class="card"><h2>Saldo y tasa de usura</h2>
       <form id="f-saldo"><div class="fields">
@@ -708,6 +723,20 @@ function bind(){
   on("f-obl", async()=>{ const p=val("ob-periodo"), monto=numVal("ob-monto"); if(!p||!(monto>0)){ toast("Escribe el mes y la cuota"); return; }
     const meses = [p, ...(document.getElementById("ob-adelante").checked ? Object.keys(S.obligaciones).filter(k=>k>p) : [])];
     try { for (const k of meses){ const prev=S.obligaciones[k]||{}; const {nota, ...resto}=prev; await api("doc/obligaciones/"+k,{method:"PUT", body:{...resto, periodo:k, monto, vence: prev.vence || (sigMes(k)+"-"+String(cfg().diaFin).padStart(2,"0"))}}); } toast(meses.length>1?`Cuota guardada en ${meses.length} meses`:"Cuota de "+mesNombre(p)+" guardada"); } catch(e){ toast("No se pudo guardar: "+e.message); }
+    await cargar(); });
+  const proyeccion = () => { const desde=val("pr-desde"), hasta=val("pr-hasta"), pct=Number(String(val("pr-pct")||"").replace(",","."));
+    if(!desde||!hasta||hasta<desde||!(pct>=0)) return null;
+    let ant=null; for (const k of Object.keys(S.obligaciones).sort()) if (k<desde) ant=k;
+    if(!ant) return null; const base=Number(S.obligaciones[ant].monto)||0; if(!(base>0)) return null;
+    const out=[]; let k=desde, n=1; while(k<=hasta && n<=60){ out.push({k, monto:Math.round(base*Math.pow(1+pct/100,n))}); k=sigMes(k); n++; }
+    return {ant, base, pct, out}; };
+  const vistaProy = () => { const el=document.getElementById("pr-vista"); if(!el) return; const r=proyeccion();
+    el.innerHTML = r ? `Parte de ${mesNombre(r.ant)} (${COP(r.base)}). ${mesNombre(r.out[0].k)}: ${COP(r.out[0].monto)}${r.out.length>1?` … ${mesNombre(r.out[r.out.length-1].k)}: <strong>${COP(r.out[r.out.length-1].monto)}</strong>`:""} · ${r.out.length} ${r.out.length===1?"mes":"meses"}.` : "Revisa las fechas: debe existir una cuota en el mes anterior a \"Desde\"."; };
+  ["pr-desde","pr-hasta","pr-pct"].forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener("input", vistaProy); }); vistaProy();
+  on("f-proy", async()=>{ const r=proyeccion(); if(!r){ toast("Revisa las fechas y el porcentaje"); return; }
+    const btn=document.querySelector("#f-proy button.primary"); if(btn){ btn.disabled=true; btn.textContent="Guardando…"; }
+    try { for (const {k,monto} of r.out){ const prev=S.obligaciones[k]||{}; const {nota, ...resto}=prev; await api("doc/obligaciones/"+k,{method:"PUT", body:{...resto, periodo:k, monto, vence: prev.vence || (sigMes(k)+"-"+String(cfg().diaFin).padStart(2,"0"))}}); }
+      toast(`Cuotas proyectadas: ${r.out.length} meses, hasta ${mesNombre(r.out[r.out.length-1].k)}`); } catch(e){ toast("No se pudo guardar: "+e.message); }
     await cargar(); });
   { const pm=document.getElementById("ob-periodo"); if(pm) pm.addEventListener("change", ()=>{ const o=S.obligaciones[pm.value]; if(o) document.getElementById("ob-monto").value=Math.round(o.monto); }); }
   on("f-saldo", async()=>{

@@ -660,6 +660,7 @@ function vistaGestion(){
         <div class="field" style="grid-column:1/-1"><label for="cf-cta">Cuenta para consignar los aportes</label><input id="cf-cta" value="${esc(c.cuentaAportes||"")}" placeholder="Banco, tipo y número de cuenta, titular"></div>
       </div>
       <label class="check"><input id="cf-int" type="checkbox" ${c.interesesActivos?"checked":""}> Cobrar intereses de mora a la tasa de usura</label>
+      <label class="check"><input id="cf-correos" type="checkbox" ${c.correosActivos!==false?"checked":""}> Enviar por correo los recordatorios de pago (día ${c.diaInicio} y día ${c.diaFin-1}) y el reporte mensual (día ${c.diaFin+1})</label>
       <button class="btn primary">Guardar reglas</button></form>
     </section>
     <section class="card" style="grid-column:1/-1"><h2>Integrantes y roles</h2>
@@ -671,6 +672,7 @@ function vistaGestion(){
       <form id="f-correos"><div class="field"><label for="cr-lista">Pegar correos de varios integrantes a la vez</label><textarea id="cr-lista" rows="4" placeholder="Pega la lista tal cual: una línea por persona, con su nombre y su correo"></textarea><span class="small muted">Busca en cada línea un nombre de integrante y un correo, y los guarda juntos.</span></div>
       <button class="btn">Guardar correos</button></form>
       <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Comprobantes en Drive: ${Object.values(S.pagos).filter(p=>p.comprobante&&p.enDrive).length} de ${Object.values(S.pagos).filter(p=>p.comprobante).length} enviados.</span><button class="btn small" data-act="drive-sync">Enviar pendientes a Drive</button></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Correos automáticos: recordatorio el día ${c.diaInicio}, último aviso el día ${c.diaFin-1} y reporte el día ${c.diaFin+1}. ${(()=>{ const sin=Object.values(S.miembros).filter(m=>!m.email).map(m=>esc(m.nombre.split(" ")[0])); return sin.length?"Sin correo: "+sin.join(", ")+".":"Todos tienen correo."; })()}</span><button class="btn small" data-act="correos-prueba">Enviarme un ejemplo</button></div>
       <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Copia de respaldo de todos los datos (sin pantallazos ni contraseñas).</span><button class="btn small" data-act="respaldo">Descargar respaldo</button></div>
       <form id="f-sim"><div class="fields"><div class="field"><label for="sm-fecha">Probar: ver el fondo como si hoy fuera</label><input id="sm-fecha" type="date" value="${ss.get("cim-fecha-sim")||h}"></div></div>
       <button class="btn">Aplicar fecha de prueba</button></form>
@@ -748,7 +750,7 @@ function bind(){
     const saldo = numVal("sd-saldo");
     await put("config","fondo",{...cfg(), saldo, saldoFecha:val("sd-fecha"), posiciones:pos, invertidoAlternativas:pos.filter(x=>x.tipo==="alternativa").reduce((t,x)=>t+saldo*x.pct/100,0)}); toast("Saldo e inversiones actualizados"); });
   on("f-usura", async()=>{ const t=Number(String(val("us-tasa")).replace(",",".")); if(!(t>0&&t<100)){ toast("Escribe la tasa en % E.A., por ejemplo 25,5"); return; } await put("usura", val("us-mes"), {tasaEA:t}); toast("Tasa guardada"); });
-  on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), interesesActivos:document.getElementById("cf-int").checked, cuentaAportes:val("cf-cta").trim()}); toast("Reglas guardadas"); });
+  on("f-cfg", async()=>{ await put("config","fondo",{...cfg(), diaInicio:+val("cf-di"), diaFin:+val("cf-df"), mesesExclusion:+val("cf-me"), penalidadExclusion:+val("cf-pe"), penalidadRetiro:+val("cf-pr"), maxAlternativas:+val("cf-ma"), tasaProyeccion:+val("cf-tp"), interesesActivos:document.getElementById("cf-int").checked, correosActivos:document.getElementById("cf-correos").checked, cuentaAportes:val("cf-cta").trim()}); toast("Reglas guardadas"); });
   on("f-correos", async()=>{
     const norm = t => String(t||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
     const ms = Object.entries(S.miembros), hechos = [], sinMatch = [];
@@ -773,6 +775,7 @@ async function onAct(ev){
   else if (a==="cargar-datos"){ const f=document.getElementById("carga-archivo").files[0]; if(!f){ toast("Elige el archivo"); return; } try { const body=JSON.parse(await f.text()); const d=await api("importar",{method:"POST", body}); loginMsg=""; toast("Datos cargados: "+(d.hechos.miembros||0)+" integrantes"); await cargar(); } catch(e){ loginMsg="No se pudo cargar: "+e.message; render(); } }
   else if (a==="ver-comp"){ verComprobante(id); }
   else if (a==="email"){ const v=(document.getElementById("em-"+id)||{}).value||""; await put("miembros", id, {...miembro(id), email:v.trim()}); toast("Correo guardado"); }
+  else if (a==="correos-prueba"){ try { const d=await api("correos-prueba",{method:"POST"}); toast(`Te enviamos ${d.enviados} correos de ejemplo a ${d.a}`); } catch(e){ toast(e.message); } }
   else if (a==="respaldo"){ try { const d=await api("exportar"); const url=URL.createObjectURL(new Blob([JSON.stringify(d,null,2)],{type:"application/json"})); const l=document.createElement("a"); l.href=url; l.download="cimiento-respaldo-"+hoy()+".json"; document.body.appendChild(l); l.click(); l.remove(); setTimeout(()=>URL.revokeObjectURL(url),5000); } catch(e){ toast(e.message); } }
   else if (a==="drive-sync"){ try { const d=await api("drive-sincronizar",{method:"POST"}); toast(`Enviados ${d.ok}`+(d.fallos?`, fallaron ${d.fallos}`:"")+(d.quedan?`, quedan ${d.quedan} (vuelve a tocar)`:"")); } catch(e){ toast(e.message); } await cargar(); }
   else if (a==="recargar"){ MODE="cargando"; await cargar(); }

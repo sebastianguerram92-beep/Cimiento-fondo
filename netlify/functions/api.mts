@@ -1,6 +1,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 import nodemailer from "nodemailer";
+import { confirmacion, enviar, recordatorio, reporte, conUsuraPublica, correoListo, type Fondo } from "../lib/correos.mts";
 
 /*
   API de Cimiento. Los datos viven en Netlify Blobs (store "cimiento"), un blob JSON por colección.
@@ -218,6 +219,10 @@ async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, 
       if (!gestor && !tieneRol(yo.m, "validador")) return "Solo quien valida pagos puede hacerlo";
       if (!["pendiente", "validado", "rechazado"].includes(body.estado)) return "Estado inválido";
       data[id] = { ...previo, estado: body.estado, validadoPor: yo.id, validadoEn: new Date().toISOString() };
+      if (previo.estado !== body.estado) {
+        const c = confirmacion({ miembros: yo.miembros } as Fondo, data[id]);
+        if (c) avisos.push(() => enviar(c));
+      }
     }
   } else if (col === "miembros") {
     if (!admin) return "Solo el administrador cambia integrantes";
@@ -392,6 +397,29 @@ export default async (req: Request, context: Context) => {
         } catch (e) { console.error("Drive", e); fallos++; }
       }
       return json({ ok, fallos, quedan: Math.max(0, pendientes.length - 20) });
+    }
+
+    // Envía al administrador un ejemplo de cada correo automático (no le llega a nadie más).
+    if (ruta === "correos-prueba" && req.method === "POST") {
+      if (!tieneRol(yo.m, "admin")) return error("Solo el administrador", 403);
+      if (!yo.m.email) return error("Guarda primero tu correo en Integrantes y roles", 400);
+      if (!correoListo()) return error("Falta configurar el correo de Gmail en Netlify", 400);
+      const f = await conUsuraPublica((await estadoCompleto()) as unknown as Fondo);
+      const c = Object.assign({ diaInicio: 1, diaFin: 5 }, f.config.fondo || {});
+      const hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
+      const obls = Object.values(f.obligaciones).sort((a: any, b: any) => a.vence.localeCompare(b.vence)) as Doc[];
+      const prox = obls.find((o) => o.vence >= hoy), ult = [...obls].reverse().find((o) => o.vence < hoy);
+      const dia = (d: string, n: number) => d.slice(0, 8) + String(n).padStart(2, "0");
+      const mio = (l: any[]) => l.find((x) => x.para[0] === yo.m.email) || l[0];
+      const sinPagos = { ...f, pagos: {} } as Fondo; // para el ejemplo del recordatorio, como si nadie hubiera pagado
+      const ejemplos = [
+        prox && mio(recordatorio(sinPagos, dia(prox.vence, c.diaInicio), false)),
+        prox && mio(recordatorio(sinPagos, dia(prox.vence, c.diaFin - 1), true)),
+        ult && reporte(f, dia(ult.vence, c.diaFin + 1)).find((x) => x.tipo === "reporte"),
+      ].filter(Boolean) as any[];
+      let n = 0;
+      for (const e of ejemplos) { await enviar({ ...e, para: [yo.m.email], asunto: "[Ejemplo] " + e.asunto }); n++; }
+      return json({ ok: true, enviados: n, a: yo.m.email });
     }
 
     if (ruta === "reiniciar-clave" && req.method === "POST") {

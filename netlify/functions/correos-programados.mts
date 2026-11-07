@@ -3,7 +3,7 @@ import { getStore } from "@netlify/blobs";
 import { conUsuraPublica, enviarDelDia, hoyBogota, type Fondo } from "../lib/correos.mts";
 
 // Corre todos los días a las 8:00 a. m. de Bogotá (13:00 UTC). Según el día envía:
-//   día de inicio del plazo → recordatorio con el valor de la cuota a todos los que no han pagado
+//   último día del mes anterior al plazo → recordatorio con el valor de la cuota a todos los que no han pagado
 //   día anterior al vencimiento → último aviso solo a quienes no han pagado
 //   día siguiente al vencimiento → reporte mensual a todos y alerta a quien está a un mes de la exclusión
 export default async () => {

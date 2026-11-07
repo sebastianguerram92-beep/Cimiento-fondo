@@ -163,7 +163,7 @@ export function recordatorio(f: Fondo, hoy: string, ultimoAviso: boolean): Corre
     const cuenta = c.cuentaAportes ? `Consigna a: ${c.cuentaAportes}.` : "";
     const asunto = ultimoAviso
       ? `Mañana vence tu aporte de ${mesNombre(o.periodo)}: ${cop(falta)}`
-      : `Ya puedes pagar tu aporte de ${mesNombre(o.periodo)}: ${cop(falta)}`;
+      : `Tu aporte de ${mesNombre(o.periodo)}: ${cop(falta)}, se paga del ${c.diaInicio} al ${Number(o.vence.slice(8))}`;
     const linea1 = ultimoAviso
       ? `Hola ${primerNombre(m)}, todavía no vemos tu aporte de ${mesNombre(o.periodo)}. El plazo vence mañana, ${fechaLarga(o.vence)}. Desde el día siguiente corren intereses de mora a la tasa de usura.`
       : `Hola ${primerNombre(m)}, del ${c.diaInicio} al ${fechaLarga(o.vence)} se paga el aporte de ${mesNombre(o.periodo)}.`;
@@ -174,7 +174,7 @@ export function recordatorio(f: Fondo, hoy: string, ultimoAviso: boolean): Corre
       para: [m.email],
       asunto,
       texto: `${linea1}\n\n${linea2}\n\n${linea3}\n\n${sitio()}/#aportes`,
-      html: marco(ultimoAviso ? "Mañana vence tu aporte" : "Ya puedes pagar tu aporte", p(esc(linea1)) + p(`<strong>${esc(linea2)}</strong>`) + p(esc(linea3)) + (ultimoAviso ? "" : bloqueFondo(f, hoy))),
+      html: marco(ultimoAviso ? "Mañana vence tu aporte" : "Se acerca tu aporte del mes", p(esc(linea1)) + p(`<strong>${esc(linea2)}</strong>`) + p(esc(linea3)) + (ultimoAviso ? "" : bloqueFondo(f, hoy))),
     });
   }
   return out;
@@ -246,7 +246,9 @@ export function confirmacion(f: Fondo, pago: Doc): Correo | null {
 export function correosDelDia(f: Fondo, hoy: string): { clave: string; correos: Correo[] }[] {
   const c = cfgDe(f), dia = Number(hoy.slice(8)), mes = hoy.slice(0, 7);
   const out: { clave: string; correos: Correo[] }[] = [];
-  if (dia === Number(c.diaInicio)) out.push({ clave: `recordatorio-${mes}`, correos: recordatorio(f, hoy, false) });
+  // Primer recordatorio: el último día del mes anterior al plazo (30 o 31; 28/29 en febrero).
+  const manana = new Date(toUTC(hoy) + 86400000).toISOString().slice(0, 10);
+  if (manana.slice(8) === "01") out.push({ clave: `recordatorio-${manana.slice(0, 7)}`, correos: recordatorio(f, manana, false) });
   if (dia === Number(c.diaFin) - 1 && Number(c.diaFin) - 1 > Number(c.diaInicio)) out.push({ clave: `recordatorio-final-${mes}`, correos: recordatorio(f, hoy, true) });
   if (dia === Number(c.diaFin) + 1) out.push({ clave: `reporte-${mes}`, correos: reporte(f, hoy) });
   return out;

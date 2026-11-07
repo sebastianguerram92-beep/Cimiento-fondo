@@ -660,7 +660,7 @@ function vistaGestion(){
         <div class="field" style="grid-column:1/-1"><label for="cf-cta">Cuenta para consignar los aportes</label><input id="cf-cta" value="${esc(c.cuentaAportes||"")}" placeholder="Banco, tipo y número de cuenta, titular"></div>
       </div>
       <label class="check"><input id="cf-int" type="checkbox" ${c.interesesActivos?"checked":""}> Cobrar intereses de mora a la tasa de usura</label>
-      <label class="check"><input id="cf-correos" type="checkbox" ${c.correosActivos!==false?"checked":""}> Enviar por correo los recordatorios de pago (día ${c.diaInicio} y día ${c.diaFin-1}) y el reporte mensual (día ${c.diaFin+1})</label>
+      <label class="check"><input id="cf-correos" type="checkbox" ${c.correosActivos!==false?"checked":""}> Enviar por correo los recordatorios de pago (último día del mes y día ${c.diaFin-1}) y el reporte mensual (día ${c.diaFin+1})</label>
       <button class="btn primary">Guardar reglas</button></form>
     </section>
     <section class="card" style="grid-column:1/-1"><h2>Integrantes y roles</h2>
@@ -672,7 +672,7 @@ function vistaGestion(){
       <form id="f-correos"><div class="field"><label for="cr-lista">Pegar correos de varios integrantes a la vez</label><textarea id="cr-lista" rows="4" placeholder="Pega la lista tal cual: una línea por persona, con su nombre y su correo"></textarea><span class="small muted">Busca en cada línea un nombre de integrante y un correo, y los guarda juntos.</span></div>
       <button class="btn">Guardar correos</button></form>
       <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Comprobantes en Drive: ${Object.values(S.pagos).filter(p=>p.comprobante&&p.enDrive).length} de ${Object.values(S.pagos).filter(p=>p.comprobante).length} enviados.</span><button class="btn small" data-act="drive-sync">Enviar pendientes a Drive</button></div>
-      <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Correos automáticos: recordatorio el día ${c.diaInicio}, último aviso el día ${c.diaFin-1} y reporte el día ${c.diaFin+1}. ${(()=>{ const sin=Object.values(S.miembros).filter(m=>!m.email).map(m=>esc(m.nombre.split(" ")[0])); return sin.length?"Sin correo: "+sin.join(", ")+".":"Todos tienen correo."; })()}</span><button class="btn small" data-act="correos-prueba">Enviarme un ejemplo</button></div>
+      <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Correos automáticos: recordatorio el último día de cada mes, último aviso el día ${c.diaFin-1} y reporte el día ${c.diaFin+1}. ${(()=>{ const sin=Object.values(S.miembros).filter(m=>!m.email).map(m=>esc(m.nombre.split(" ")[0])); return sin.length?"Sin correo: "+sin.join(", ")+".":"Todos tienen correo."; })()}</span><button class="btn small" data-act="correos-prueba">Enviarme un ejemplo</button></div>
       <div class="row" style="flex-wrap:wrap;gap:8px"><span class="small muted">Copia de respaldo de todos los datos (sin pantallazos ni contraseñas).</span><button class="btn small" data-act="respaldo">Descargar respaldo</button></div>
       <form id="f-sim"><div class="fields"><div class="field"><label for="sm-fecha">Probar: ver el fondo como si hoy fuera</label><input id="sm-fecha" type="date" value="${ss.get("cim-fecha-sim")||h}"></div></div>
       <button class="btn">Aplicar fecha de prueba</button></form>

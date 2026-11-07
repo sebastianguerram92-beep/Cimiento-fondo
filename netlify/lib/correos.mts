@@ -10,7 +10,7 @@ import nodemailer from "nodemailer";
 
 type Doc = Record<string, any>;
 type Data = Record<string, Doc>;
-export type Fondo = { config: Data; miembros: Data; obligaciones: Data; pagos: Data; usura: Data };
+export type Fondo = { config: Data; miembros: Data; obligaciones: Data; pagos: Data; usura: Data; portafolio?: Doc[] };
 
 const env = (k: string) => Netlify.env.get(k) || "";
 export const sitio = () => env("SITE_URL") || env("URL") || "https://cimiento-fondo.netlify.app";
@@ -36,6 +36,10 @@ export async function conUsuraPublica(f: Fondo): Promise<Fondo> {
     const r = await fetch(sitio() + "/usura.json", { signal: AbortSignal.timeout(5000) });
     if (r.ok) { const u = await r.json(); f.usura = { ...(u.meses || {}), ...f.usura }; }
   } catch { /* sin red: se usa lo cargado en Gestión */ }
+  try {
+    const r = await fetch(sitio() + "/portafolio.json", { signal: AbortSignal.timeout(5000) });
+    if (r.ok) f.portafolio = (await r.json()).posiciones || [];
+  } catch { /* sin portafolio publicado */ }
   return f;
 }
 
@@ -84,7 +88,7 @@ export async function enviar(c: Correo) {
   return true;
 }
 
-const marco = (titulo: string, cuerpo: string) => `<!doctype html><html><body style="margin:0;background:#f4f4f2;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1f1d">
+const marco = (titulo: string, cuerpo: string) => `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#f4f4f2;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1b1f1d">
 <div style="max-width:560px;margin:0 auto;padding:24px 16px">
 <div style="font-weight:700;font-size:18px;color:#1F5F4A;margin-bottom:14px">cimiento</div>
 <div style="background:#fff;border:1px solid #e3e3df;border-radius:14px;padding:20px">
@@ -92,6 +96,52 @@ const marco = (titulo: string, cuerpo: string) => `<!doctype html><html><body st
 <p style="margin:20px 0 0"><a href="${sitio()}" style="background:#1F5F4A;color:#fff;text-decoration:none;padding:10px 16px;border-radius:10px;display:inline-block;font-weight:600">Abrir Cimiento</a></p>
 </div><p style="font-size:12px;color:#6b706d;margin-top:12px">Correo automático del fondo Cimiento.</p></div></body></html>`;
 const p = (t: string) => `<p style="margin:0 0 10px;line-height:1.5">${t}</p>`;
+
+/* ---------- Gráficas del estado del fondo (tablas HTML: funcionan en Gmail y en el celular) ---------- */
+const VERDE = "#1F5F4A", VERDE_CLARO = "#cfe3da", AMBAR = "#E0A43A", GRIS = "#6b706d";
+const barra = (pct: number, color: string, fondo = "#eeeeea", alto = 10) => {
+  const v = Math.max(0, Math.min(100, pct));
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;border-radius:6px;overflow:hidden"><tr>${v > 0 ? `<td width="${v.toFixed(1)}%" bgcolor="${color}" style="background:${color};height:${alto}px;line-height:${alto}px;font-size:0">&nbsp;</td>` : ""}${v < 100 ? `<td bgcolor="${fondo}" style="background:${fondo};height:${alto}px;line-height:${alto}px;font-size:0">&nbsp;</td>` : ""}</tr></table>`;
+};
+const subt = (t: string) => `<div style="font-size:13px;font-weight:700;margin:18px 0 8px;color:#1b1f1d">${t}</div>`;
+
+export function bloqueFondo(f: Fondo, hoy: string) {
+  const c = cfgDe(f) as Doc, meta = Number(c.meta) || 50000000;
+  const validados = Object.values(f.pagos).filter((p) => p.estado === "validado" && (p.tipo || "aporte") === "aporte");
+  const aportado = validados.reduce((s, p) => s + Number(p.monto), 0);
+  const saldo = Number(c.saldo) || aportado;
+  const rend = c.saldo ? saldo - aportado : 0;
+  const n = Object.keys(f.miembros).length;
+
+  // KPIs
+  const kpi = (t: string, v: string, col = "#1b1f1d") => `<td style="padding:10px;background:#f4f4f2;border-radius:10px" width="33%"><div style="font-size:11px;color:${GRIS}">${t}</div><div style="font-size:16px;font-weight:700;color:${col}">${v}</div></td>`;
+  let h = `<table role="presentation" width="100%" cellpadding="0" cellspacing="6" style="margin:0 -6px"><tr>${kpi("Valor del fondo", cop(saldo), VERDE)}${kpi("Total aportado", cop(aportado))}${kpi("Rendimiento", (rend >= 0 ? "+" : "") + cop(rend), rend >= 0 ? VERDE : "#9b2c22")}</tr></table>`;
+
+  // Camino a la meta
+  const pm = saldo / meta * 100;
+  h += subt(`Camino a ${cop(meta)}`) + barra(pm, VERDE, "#eeeeea", 14) + `<div style="font-size:12px;color:${GRIS};margin-top:4px">${pm.toLocaleString("es-CO", { maximumFractionDigits: 1 })}% de la meta</div>`;
+
+  // Aportes por mes (últimos 6 meses vencidos o en curso): recibido vs esperado
+  const obls = Object.values(f.obligaciones).filter((o) => o.vence.slice(0, 7) <= hoy.slice(0, 7)).sort((a, b) => a.periodo.localeCompare(b.periodo)).slice(-6);
+  if (obls.length) {
+    const max = Math.max(...obls.map((o) => n * Number(o.monto)));
+    h += subt("Aportes recibidos por mes");
+    h += `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">${obls.map((o) => {
+      const esperado = n * Number(o.monto), rec = validados.filter((p) => p.periodo === o.periodo).reduce((s, p) => s + Number(p.monto), 0);
+      return `<tr><td width="28%" style="font-size:12px;color:${GRIS};padding:4px 8px 4px 0;white-space:nowrap">${mesNombre(o.periodo).replace(/ (\d\d)(\d\d)$/, " $2")}</td><td style="padding:4px 0">${barra(rec / max * 100, VERDE, esperado > rec ? VERDE_CLARO : "#ffffff")}<div style="font-size:11px;color:${GRIS}">${cop(rec)} de ${cop(esperado)}</div></td></tr>`;
+    }).join("")}</table>`;
+  }
+
+  // Dónde está el dinero
+  const pos: Doc[] = Array.isArray(c.posiciones) && c.posiciones.length ? c.posiciones : f.portafolio || [];
+  if (pos.length) {
+    const colores = [VERDE, AMBAR, "#5b8c7a", "#b77b1f", "#93b8a9"];
+    h += subt("Dónde está el dinero hoy");
+    h += `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:6px;overflow:hidden"><tr>${pos.map((x, i) => `<td width="${Number(x.pct)}%" bgcolor="${colores[i % colores.length]}" style="background:${colores[i % colores.length]};height:14px;font-size:0">&nbsp;</td>`).join("")}</tr></table>`;
+    h += pos.map((x, i) => `<div style="font-size:12px;margin-top:6px"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colores[i % colores.length]};vertical-align:middle"></span> <strong>${Number(x.pct)}%</strong> ${esc(x.nombre)}${x.titular ? ` <span style="color:${GRIS}">· ${esc(x.titular)} · ${esc(x.tipo || "")}</span>` : ""}</div>`).join("");
+  }
+  return `<div style="border-top:1px solid #eee;margin-top:18px;padding-top:4px"><div style="font-size:15px;font-weight:700;margin-top:12px">Estado del fondo</div>${h}</div>`;
+}
 
 const primerNombre = (m: Doc) => String(m.nombre || "").split(/\s+/)[0];
 
@@ -124,7 +174,7 @@ export function recordatorio(f: Fondo, hoy: string, ultimoAviso: boolean): Corre
       para: [m.email],
       asunto,
       texto: `${linea1}\n\n${linea2}\n\n${linea3}\n\n${sitio()}/#aportes`,
-      html: marco(ultimoAviso ? "Mañana vence tu aporte" : "Ya puedes pagar tu aporte", p(esc(linea1)) + p(`<strong>${esc(linea2)}</strong>`) + p(esc(linea3))),
+      html: marco(ultimoAviso ? "Mañana vence tu aporte" : "Ya puedes pagar tu aporte", p(esc(linea1)) + p(`<strong>${esc(linea2)}</strong>`) + p(esc(linea3)) + (ultimoAviso ? "" : bloqueFondo(f, hoy))),
     });
   }
   return out;
@@ -164,7 +214,7 @@ export function reporte(f: Fondo, hoy: string): Correo[] {
   const html = marco(`Reporte de ${mesNombre(o.periodo)}`,
     p(`Aporte de ${esc(mesNombre(o.periodo))}: cuota ${cop(o.monto)}, vencía el ${esc(fechaLarga(o.vence))}. <strong>${pagaron} de ${filas.length}</strong> pagaron.`) + tabla +
     p(`<br>${mora.length ? `Total en mora: <strong>${cop(totalMora)}</strong> (capital más intereses a la tasa de usura).` : "Nadie está en mora."}`) +
-    (c.saldo ? p(`Valor del fondo: <strong>${cop(c.saldo)}</strong>${c.saldoFecha ? ` (corte ${esc(fechaLarga(c.saldoFecha))})` : ""}.`) : ""));
+    (c.saldoFecha ? p(`<span style="color:${GRIS};font-size:12px">Saldo con corte al ${esc(fechaLarga(c.saldoFecha))}.</span>`) : "") + bloqueFondo(f, hoy));
 
   const para = Object.values(f.miembros).map((m) => m.email).filter(Boolean);
   const out: Correo[] = para.length ? [{ tipo: "reporte", para, asunto, texto, html }] : [];

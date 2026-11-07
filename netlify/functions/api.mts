@@ -411,7 +411,8 @@ export default async (req: Request, context: Context) => {
       const prox = obls.find((o) => o.vence >= hoy), ult = [...obls].reverse().find((o) => o.vence < hoy);
       const dia = (d: string, n: number) => d.slice(0, 8) + String(n).padStart(2, "0");
       const mio = (l: any[]) => l.find((x) => x.para[0] === yo.m.email) || l[0];
-      const sinPagos = { ...f, pagos: {} } as Fondo; // para el ejemplo del recordatorio, como si nadie hubiera pagado
+      // Para el ejemplo del recordatorio: los pagos reales, menos los del mes que se cobra (como si aún no hubieran pagado).
+      const sinPagos = { ...f, pagos: Object.fromEntries(Object.entries(f.pagos).filter(([, p]) => !prox || p.periodo !== prox.periodo)) } as Fondo;
       const ejemplos = [
         prox && mio(recordatorio(sinPagos, dia(prox.vence, c.diaInicio), false)),
         prox && mio(recordatorio(sinPagos, dia(prox.vence, c.diaFin - 1), true)),

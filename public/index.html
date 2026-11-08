@@ -117,6 +117,13 @@ a.btn{text-decoration:none}
 .members{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
 .members button{min-height:48px;border:1px solid var(--line);border-radius:10px;background:var(--surface);text-align:left;padding:8px 12px;font-size:14px}
 .members button[aria-pressed="true"]{border-color:var(--brand);background:var(--brand-soft);color:var(--brand);font-weight:600}
+main .grid2:has(details.plegable){align-items:start}
+details.plegable>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;min-height:28px}
+details.plegable>summary::-webkit-details-marker{display:none}
+details.plegable>summary>*{flex:1;margin:0}
+details.plegable>summary::after{content:"";flex:none;width:9px;height:9px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin:-4px 4px 0 0;transition:transform .15s}
+details.plegable[open]>summary::after{transform:rotate(-135deg);margin-top:4px}
+.plegable-cuerpo{display:flex;flex-direction:column;gap:12px;margin-top:14px}
 .bar{height:26px;border-radius:8px;background:var(--brand-soft);position:relative;overflow:hidden}
 .bar span{position:absolute;inset:0 auto 0 0;background:var(--brand)}
 .bar i{position:absolute;top:0;bottom:0;border-left:2px dashed var(--fg)}
@@ -345,8 +352,26 @@ function render(){
   ${sim?`<div class="wrap" style="padding-top:12px"><div class="alert warn"><div><strong>Viendo el fondo como si hoy fuera ${fechaLarga(sim)}</strong><span class="small">Modo de prueba. <button class="btn small ghost" data-act="sim-off" style="color:inherit;text-decoration:underline;min-height:0;padding:0">Volver a hoy</button></span></div></div></div>`:""}
   ${r==="entrar" ? vistaLogin() : `<main class="wrap">${({inicio:vistaGeneral,mi:vistaInicio,aportes:vistaAportes,gestion:vistaGestion})[r]()}</main>`}
   ${logueado?`<nav class="bottomnav" style="--n:${tabs.length}" aria-label="Secciones">${nav}</nav>`:""}`;
+  if (r === "gestion") desplegables();
   bind();
   if (active){ const el=document.getElementById(active); if(el) el.focus(); }
+}
+// Gestión: cada sección es un desplegable; se recuerda cuáles dejaste abiertas.
+function desplegables(){
+  let abiertas; try { abiertas = JSON.parse(ss.get("cim-gestion-abiertas")||"null"); } catch(e){ abiertas = null; }
+  document.querySelectorAll("main section.card").forEach(sec=>{
+    const h2 = sec.querySelector("h2"); if (!h2) return;
+    const cab = h2.parentElement===sec ? h2 : h2.closest("section > *");
+    const titulo = h2.textContent.trim();
+    const d = document.createElement("details"); d.className = "plegable";
+    const abierta = abiertas ? abiertas.includes(titulo) : (titulo==="Pagos por validar" && !!sec.querySelector('[data-act="validar"]'));
+    if (abierta) d.open = true;
+    const sum = document.createElement("summary"); sum.appendChild(cab);
+    const cuerpo = document.createElement("div"); cuerpo.className = "plegable-cuerpo";
+    while (sec.firstChild) cuerpo.appendChild(sec.firstChild);
+    d.append(sum, cuerpo); sec.appendChild(d);
+    d.addEventListener("toggle", ()=>{ const l=[...document.querySelectorAll("details.plegable")].filter(x=>x.open).map(x=>x.querySelector("h2").textContent.trim()); ss.set("cim-gestion-abiertas", JSON.stringify(l)); });
+  });
 }
 
 function vistaCarga(){

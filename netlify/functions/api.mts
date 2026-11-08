@@ -135,7 +135,7 @@ const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto"
 const mesNombre = (p: string) => { const [y, m] = p.split("-").map(Number); return `${MESES[m - 1] || p} ${y}`; };
 
 // Correo a quienes validan pagos (gestor o administrador con email registrado).
-async function avisarPago(miembros: Data, id: string, pago: Doc, comprobante: { bytes: Uint8Array; tipo: string } | null) {
+async function avisarPago(miembros: Data, id: string, pago: Doc, comprobante: { bytes: Uint8Array; tipo: string } | null, detalle = "") {
   const user = env("GMAIL_USER"), pass = env("GMAIL_APP_PASSWORD").replace(/\s+/g, "");
   if (!user || !pass) return false;
   const destinos = Object.values(miembros).filter((m) => m.email && ((m.roles || []).includes("validador") || (m.roles || []).includes("gestor"))).map((m) => m.email);
@@ -147,8 +147,8 @@ async function avisarPago(miembros: Data, id: string, pago: Doc, comprobante: { 
   await t.sendMail({
     from: `Cimiento <${user}>`,
     to: destinos.join(", "),
-    subject: `Pago por validar: ${quien}, ${cop(pago.monto)} (${mesNombre(pago.periodo)})`,
-    text: `${quien} registró un pago de ${tipo} de ${mesNombre(pago.periodo)} por ${cop(pago.monto)}, transferido el ${pago.fecha}${pago.referencia ? " (ref. " + pago.referencia + ")" : ""}.\n\nRevisa que el dinero haya entrado a la cuenta y valídalo o recházalo en ${sitio}/#gestion\n\n${comprobante ? "El pantallazo de la consignación va adjunto." : "No adjuntó pantallazo."}`,
+    subject: `Pago por validar: ${quien}, ${cop(pago.monto)}${detalle ? " (ponerse al día)" : ` (${mesNombre(pago.periodo)})`}`,
+    text: `${detalle ? `${quien} registró un pago para ponerse al día por ${cop(pago.monto)}, transferido el ${pago.fecha}:\n${detalle}\n\nEn Gestión aparece como un pago por cada concepto; valídalos todos si el total entró.` : `${quien} registró un pago de ${tipo} de ${mesNombre(pago.periodo)} por ${cop(pago.monto)}, transferido el ${pago.fecha}${pago.referencia ? " (ref. " + pago.referencia + ")" : ""}.`}\n\nRevisa que el dinero haya entrado a la cuenta y valídalo o recházalo en ${sitio}/#gestion\n\n${comprobante ? "El pantallazo de la consignación va adjunto." : "No adjuntó pantallazo."}`,
     attachments: comprobante ? [{ filename: `comprobante-${id}.${comprobante.tipo.split("/")[1]}`, content: Buffer.from(comprobante.bytes), contentType: comprobante.tipo }] : [],
   });
   return true;
@@ -191,7 +191,7 @@ async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, 
     if (!previo) {
       if (body.miembro !== yo.id && !gestor) return "Solo puedes registrar tus propios pagos";
       const monto = Number(body.monto);
-      if (!(monto > 0)) return "Monto inválido";
+      if (!(monto > 0) && !Array.isArray(body.partes)) return "Monto inválido";
       let comprobante: { bytes: Uint8Array; tipo: string } | null = null;
       if (body.comprobante) {
         const m = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(body.comprobante));
@@ -199,6 +199,27 @@ async function guardarDoc(yo: { id: string; m: Doc; miembros: Data }, col: Col, 
         const bytes = new Uint8Array(Buffer.from(m[2], "base64"));
         if (bytes.length > MAX_COMPROBANTE) return "La imagen del comprobante es muy grande";
         comprobante = { bytes, tipo: m[1] };
+      }
+      // Ponerse al día: un solo pantallazo para varias cuotas vencidas más los intereses (un registro por concepto).
+      if (Array.isArray(body.partes) && body.partes.length) {
+        const partes = body.partes.slice(0, 24).map((x: Doc) => ({ tipo: x.tipo === "interes" ? "interes" : "aporte", periodo: String(x.periodo || "").slice(0, 7), monto: Math.round(Number(x.monto)) })).filter((x: Doc) => x.monto > 0 && /^\d{4}-\d{2}$/.test(x.periodo));
+        if (!partes.length) return "Monto inválido";
+        if (!comprobante) return "Sube el pantallazo de la consignación";
+        const grupo = id, fecha = String(body.fecha || "").slice(0, 10), creado = new Date().toISOString();
+        const ids: string[] = [];
+        for (const [i, x] of partes.entries()) {
+          const pid = i === 0 ? id : `${id}-${i + 1}`;
+          if (data[pid]) return "Pago duplicado";
+          await comprobantes().set(pid, comprobante.bytes, { metadata: { tipo: comprobante.tipo, miembro: body.miembro } });
+          data[pid] = { miembro: body.miembro, ...x, fecha, referencia: "", estado: "pendiente", creado, creadoPor: yo.id, comprobante: true, grupo };
+          ids.push(pid);
+        }
+        const total = partes.reduce((t: number, x: Doc) => t + x.monto, 0);
+        const detalle = partes.map((x: Doc) => `• ${x.tipo === "interes" ? "Intereses de mora" : "Aporte de " + mesNombre(x.periodo)}: ${cop(x.monto)}`).join("\n");
+        avisos.push(() => avisarPago(yo.miembros, id, { ...data[id], monto: total }, comprobante, detalle));
+        for (const pid of ids) avisos.push(() => guardarEnDrive(yo.miembros, pid, data[pid], comprobante!).then(() => false));
+        await escribir(col, data);
+        return null;
       }
       if (comprobante) await comprobantes().set(id, comprobante.bytes, { metadata: { tipo: comprobante.tipo, miembro: body.miembro } });
       data[id] = {

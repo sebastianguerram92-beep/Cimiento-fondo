@@ -388,7 +388,7 @@ function vistaInicio(){
   const prox = e.proximas[0];
   let alerta = "";
   if (e.exclusion) alerta = `<div class="alert bad"><div><strong>Llevas ${e.meses} meses de mora acumulados</strong>Según lo aprobado, aplica la exclusión con penalidad del ${c.penalidadExclusion}% (${COP(e.penalidad)}). Habla con la coordinación; si hay fuerza mayor puedes pedir una excepción.</div></div>`;
-  else if (e.meses) alerta = `<div class="alert bad"><div><strong>Tienes ${COP(e.pendiente)} vencidos</strong>${e.vencidas.map(v=>`${mesNombre(v.periodo)}: ${v.dias} días de mora`).join(" · ")}. Tu voto está suspendido hasta ponerte al día.</div></div>`;
+  else if (e.meses) alerta = `<div class="alert bad"><div><strong>Debes ${COP(e.pendiente + e.interesPendiente)} para ponerte al día</strong>${COP(e.pendiente)} de cuotas (${e.vencidas.map(v=>`${mesNombre(v.periodo)}, ${v.dias} días`).join("; ")}) + ${COP(e.interesPendiente)} de intereses de mora. Tu voto está suspendido hasta ponerte al día. <a href="#aportes">Pagar ahora</a></div></div>`;
   else if (prox && prox.enVentana) alerta = `<div class="alert warn"><div><strong>Ya puedes pagar tu aporte de ${mesNombre(prox.periodo)}: ${prox.faltanDias===0?"hoy es el último día":"te quedan "+(prox.faltanDias+1)+" días"}</strong>${COP(prox.falta)} ${ventana(prox)}. Desde el día siguiente corre la mora.</div></div>`;
   return `<div class="stack">
     <div class="row"><h1>Hola, ${esc(m.nombre.split(" ")[0])}</h1>${chipEstado(e)}</div>
@@ -431,12 +431,40 @@ function vistaInicio(){
   </div>`;
 }
 
+function deudaAlDia(e){
+  // Lo que debe hoy, descontando lo que ya registró y está por validar.
+  const pend = pagosDe(yo).filter(p=>p.estado==="pendiente");
+  const cuotas = e.vencidas.map(v=>({periodo:v.periodo, monto:Math.max(0, Math.round(v.falta - pend.filter(p=>(p.tipo||"aporte")==="aporte"&&p.periodo===v.periodo).reduce((t,p)=>t+Number(p.monto),0)))})).filter(x=>x.monto>0);
+  const intereses = Math.max(0, Math.round(e.interesPendiente - pend.filter(p=>p.tipo==="interes").reduce((t,p)=>t+Number(p.monto),0)));
+  return { cuotas, intereses, total: cuotas.reduce((t,x)=>t+x.monto,0) + intereses, porValidar: pend.length };
+}
+function tarjetaPonerseAlDia(e){
+  const d = deudaAlDia(e);
+  if (!(d.total>0)) return d.porValidar && e.meses>0 ? `<section class="card"><div class="alert warn"><div><strong>Tu pago para ponerte al día está por validar</strong>Cuando se valide, tu estado vuelve a quedar al día.</div></div></section>` : "";
+  return `<section class="card" style="border-color:var(--bad-fg)"><div class="row"><h2>Ponte al día</h2><span class="pill bad">${e.meses} ${e.meses===1?"mes":"meses"} en mora</span></div>
+    <div><div class="small muted">Total a pagar hoy</div><div class="big num" style="font-size:34px">${COP(d.total)}</div></div>
+    <div class="list small">
+      ${d.cuotas.map(x=>`<div><span>Cuota de ${mesNombre(x.periodo)}</span><span class="num">${COP(x.monto)}</span></div>`).join("")}
+      ${d.intereses>0?`<div><span>Intereses de mora (tasa de usura)</span><span class="num">${COP(d.intereses)}</span></div>`:""}
+    </div>
+    <span class="small muted">Los intereses suben cada día que pasa. ${cfg().cuentaAportes?"Consigna a: "+esc(cfg().cuentaAportes)+".":""}</span>
+    <form id="f-aldia">
+      <div class="fields">
+        <div class="field"><label for="ad-fecha">Fecha de la transferencia</label><input id="ad-fecha" type="date" value="${hoy()}" required></div>
+        <div class="field"><label for="ad-comp">Pantallazo de la consignación por ${COP(d.total)}</label><input id="ad-comp" type="file" accept="image/*" required></div>
+      </div>
+      <button class="btn primary">Registrar pago de ${COP(d.total)}</button>
+    </form>
+    <span class="small muted">Si vas a pagar solo una parte, usa "Registrar un pago" más abajo.</span>
+  </section>`;
+}
 function vistaAportes(){
   const e = estadoMiembro(yo), obls = obligacionesOrden();
   const sugerida = e.vencidas[0] || e.proximas[0];
   const mis = pagosDe(yo).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
   return `<div class="stack"><h1>Aportes</h1>
   <div class="grid2">
+    ${tarjetaPonerseAlDia(e)}
     <section class="card"><h2>Registrar un pago</h2>
       ${obls.length ? `<form id="f-pago">
         <div class="fields">
@@ -563,6 +591,7 @@ function vistaGeneral(){
         <span class="small muted">Intereses a la tasa de usura desde el día ${c.diaFin+1}. Exclusión al acumular ${c.mesesExclusion} meses, con penalidad del ${c.penalidadExclusion}%.</span>
       </section>
     </div>
+    ${tarjetaIntereses(est)}
     <div class="grid2">
       <section class="card"><h2>Inversiones</h2>
         <div class="small muted">Dónde está el dinero hoy</div>
@@ -590,6 +619,23 @@ function vistaGeneral(){
   </div>`;
 }
 
+function tarjetaIntereses(est){
+  // Solo aparece si alguien ha estado en mora alguna vez (hay intereses causados o pagados).
+  const pagos = Object.values(S.pagos).filter(p=>p.estado==="validado" && p.tipo==="interes");
+  const pagado = pagos.reduce((t,p)=>t+Number(p.monto),0);
+  const causado = est.reduce((t,x)=>t+x.e.interesCausado,0), pendiente = est.reduce((t,x)=>t+x.e.interesPendiente,0);
+  const huboMora = pagado>0 || causado>0 || est.some(x=>x.e.meses>0);
+  if (!huboMora) return "";
+  const porMes = {}; pagos.forEach(p=>{ const k=(p.fecha||p.periodo||"").slice(0,7); if(k) porMes[k]=(porMes[k]||0)+Number(p.monto); });
+  const meses = Object.keys(porMes).sort().slice(-12), max = Math.max(1, ...meses.map(k=>porMes[k]));
+  let acum = 0;
+  return `<section class="card"><div class="row"><h2>Intereses de mora</h2><span class="small muted">A la tasa de usura</span></div>
+    <div class="row small"><span>Pagados al fondo <strong class="num">${COP(pagado)}</strong></span><span>Por cobrar <strong class="num">${COP(pendiente)}</strong></span></div>
+    ${meses.length?`<div class="small muted">Intereses pagados por mes</div><div class="list small">${meses.map(k=>{ acum+=porMes[k]; return `<div style="display:grid;grid-template-columns:88px 1fr auto;gap:10px;align-items:center"><span>${mesCorto(k)}</span><div class="bar" style="height:12px"><span style="width:${(porMes[k]/max*100).toFixed(1)}%;background:var(--amber)"></span></div><span class="num" style="text-align:right">${COP(porMes[k])}<br><span class="muted">acum. ${COP(acum)}</span></span></div>`; }).join("")}</div>`
+    :`<p class="muted small" style="margin:0">Todavía no se han pagado intereses; aparecerán aquí cuando se validen.</p>`}
+    <span class="small muted">Los intereses de mora entran al fondo y benefician a todos según su participación.</span>
+  </section>`;
+}
 function vistaGestion(){
   const c = cfg(), h = hoy();
   const pend = Object.entries(S.pagos).map(([id,p])=>({id,...p})).filter(p=>p.estado==="pendiente").sort((a,b)=>a.fecha.localeCompare(b.fecha));
@@ -723,6 +769,17 @@ function bind(){
       const d = await api("doc/pagos/"+uid(), {method:"PUT", body:{miembro:yo, tipo:val("pg-tipo"), periodo:val("pg-periodo"), monto, fecha:val("pg-fecha"), comprobante}});
       toast(d.aviso==="enviado" ? "Pago enviado. Le llegó un correo a quien valida." : "Pago enviado para validación");
     } catch(e){ toast("No se pudo enviar: "+e.message); }
+    await cargar(); });
+  on("f-aldia", async()=>{
+    const d = deudaAlDia(estadoMiembro(yo)); if(!(d.total>0)) return;
+    const f=document.getElementById("ad-comp").files[0]; if(!f){ toast("Sube el pantallazo de la consignación"); return; }
+    const btn=document.querySelector("#f-aldia button.primary"); if(btn){ btn.disabled=true; btn.textContent="Enviando…"; }
+    try {
+      const comprobante = await reducirImagen(f);
+      const partes = [...d.cuotas.map(x=>({tipo:"aporte", periodo:x.periodo, monto:x.monto})), ...(d.intereses>0?[{tipo:"interes", periodo:(d.cuotas[0]||estadoMiembro(yo).vencidas[0]||{periodo:hoy().slice(0,7)}).periodo, monto:d.intereses}]:[])];
+      const r = await api("doc/pagos/"+uid(), {method:"PUT", body:{miembro:yo, monto:d.total, fecha:val("ad-fecha"), partes, comprobante}});
+      toast(r.aviso==="enviado" ? "Pago enviado. Le llegó un correo a quien valida." : "Pago enviado para validación");
+    } catch(e){ toast("No se pudo enviar: "+e.message); if(btn){ btn.disabled=false; btn.textContent="Registrar pago de "+COP(d.total); } }
     await cargar(); });
   on("f-obl", async()=>{ const p=val("ob-periodo"), monto=numVal("ob-monto"); if(!p||!(monto>0)){ toast("Escribe el mes y la cuota"); return; }
     const meses = [p, ...(document.getElementById("ob-adelante").checked ? Object.keys(S.obligaciones).filter(k=>k>p) : [])];

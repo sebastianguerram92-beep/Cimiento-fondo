@@ -252,7 +252,7 @@ function estadoMiembro(mid){
   const aportado = aporte.reduce((s,p)=>s+Number(p.monto),0);
   const cuotas = aportado / c.valorNominal;
   let pendiente = 0, interesCausado = 0, sinTasa = false;
-  const vencidas = [], proximas = [], hist = [];
+  const vencidas = [], proximas = [], hist = [], detalleInteres = [];
   obligacionesOrden().forEach(o=>{
     const pagado = aporte.filter(p=>p.periodo===o.periodo).reduce((s,p)=>s+Number(p.monto),0);
     const falta = Math.max(0, Number(o.monto) - pagado);
@@ -260,7 +260,8 @@ function estadoMiembro(mid){
     if (c.interesesActivos) {
       aporte.filter(p=>p.periodo===o.periodo && p.fecha > o.vence).forEach(p=>{
         const t = tasaUsura(o.vence); if (t==null) sinTasa = true;
-        interesCausado += interes(Number(p.monto), dias(o.vence,p.fecha), t);
+        const ip = interes(Number(p.monto), dias(o.vence,p.fecha), t);
+        interesCausado += ip; if (ip>0) detalleInteres.push({periodo:o.periodo, base:Number(p.monto), dias:dias(o.vence,p.fecha), tasa:t, monto:ip, tarde:true});
       });
     }
     if (falta>0 && vencida){
@@ -268,6 +269,7 @@ function estadoMiembro(mid){
       if (c.interesesActivos && t==null) sinTasa = true;
       const i = c.interesesActivos ? interes(falta, d, t) : 0;
       interesCausado += i; pendiente += falta;
+      if (i>0) detalleInteres.push({periodo:o.periodo, base:falta, dias:d, tasa:t, monto:i, tarde:false});
       vencidas.push({...o, falta, dias:d, interes:i});
     } else if (falta>0) proximas.push({...o, falta, faltanDias:dias(h,o.vence), enVentana: h >= abre(o)});
     hist.push({...o, pagado, falta, vencida});
@@ -280,7 +282,7 @@ function estadoMiembro(mid){
     aportado, cuotas, valor, ganancia: valor - aportado,
     participacion: T.cuotas>0 ? cuotas/T.cuotas*100 : 0,
     pendiente, interesCausado, interesPagado, interesPendiente, sinTasa,
-    vencidas, proximas, hist, meses,
+    vencidas, proximas, hist, meses, detalleInteres,
     voto: meses===0,
     exclusion: meses >= c.mesesExclusion,
     penalidad: valor * c.penalidadExclusion/100,
@@ -445,7 +447,8 @@ function tarjetaPonerseAlDia(e){
     <div><div class="small muted">Total a pagar hoy</div><div class="big num" style="font-size:34px">${COP(d.total)}</div></div>
     <div class="list small">
       ${d.cuotas.map(x=>`<div><span>Cuota de ${mesNombre(x.periodo)}</span><span class="num">${COP(x.monto)}</span></div>`).join("")}
-      ${d.intereses>0?`<div><span>Intereses de mora (tasa de usura)</span><span class="num">${COP(d.intereses)}</span></div>`:""}
+      ${d.intereses>0?`<div><span>Intereses de mora</span><span class="num">${COP(d.intereses)}</span></div>
+      <div style="display:block;border:0;padding-top:0"><div class="muted" style="display:flex;flex-direction:column;gap:4px;font-size:12.5px">${e.detalleInteres.map(x=>`<div style="display:flex;justify-content:space-between;gap:10px"><span>${mesNombre(x.periodo)}${x.tarde?" (pagado tarde)":""}: ${COP(x.base)} × ${x.dias} ${x.dias===1?"día":"días"} a ${x.tasa!=null?PCT(x.tasa)+" E.A.":"tasa sin cargar"}</span><span class="num">${COP(x.monto)}</span></div>`).join("")}${(()=>{ const ya=Math.round(e.interesCausado-d.intereses); return ya>0?`<div style="display:flex;justify-content:space-between;gap:10px"><span>Menos intereses ya pagados o por validar</span><span class="num">−${COP(ya)}</span></div>`:""; })()}<div>Tasa de usura vigente al vencimiento de cada cuota (Superfinanciera).</div></div></div>`:""}
     </div>
     <span class="small muted">Los intereses suben cada día que pasa. ${cfg().cuentaAportes?"Consigna a: "+esc(cfg().cuentaAportes)+".":""}</span>
     <form id="f-aldia">
